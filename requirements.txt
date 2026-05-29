@@ -1,0 +1,7 @@
+openpipe-art[backend]>=0.5.18
+datasets>=3.0.0
+wandb>=0.22.0
+weave>=0.52.0
+python-dotenv>=1.0.1
+pydantic>=2.0
+rich>=13.7

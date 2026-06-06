@@ -4,15 +4,18 @@ import json
 import importlib
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from course.shared.config import RetailCourseConfig
 from course.shared.data import normalize_record, sample_records, scenario_from_record
 from course.shared.rl_sampling import reward_signal_metrics
 from course.shared.retail_env import ReplayRetailEnv, is_state_changing_tool
 from course.shared.rewards import score_messages
+from course.shared.wandb_artifacts import checkpoint_artifact_aliases, latest_checkpoint_dir, select_checkpoint_dir
 
 record_to_next_action_examples = importlib.import_module(
     "course.03_sft_warmup.make_next_action_sft_jsonl"
@@ -328,6 +331,34 @@ class RetailRewardInvariantTests(unittest.TestCase):
         self.assertEqual(dataset_rows[0]["model_artifact_path"], "retail-support-agent-checkpoint:grpo")
         self.assertEqual(outputs[row_id]["metrics"]["outcome_success"], 1.0)
         self.assertEqual(outputs[row_id]["metadata"]["model"], "LiquidAI/LFM2.5-8B-A1B")
+
+    def test_checkpoint_selection_supports_historical_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = RetailCourseConfig(project="proj", art_path=tmp, model_name="retail-model")
+            root = Path(tmp) / "proj" / "models" / "retail-model" / "checkpoints"
+            (root / "0001").mkdir(parents=True)
+            (root / "0003").mkdir()
+
+            self.assertEqual(latest_checkpoint_dir(cfg).name, "0003")
+            self.assertEqual(select_checkpoint_dir(cfg, checkpoint_step=1).name, "0001")
+            self.assertEqual(select_checkpoint_dir(cfg, checkpoint_path=root / "0003").name, "0003")
+            with self.assertRaises(FileNotFoundError):
+                select_checkpoint_dir(cfg, checkpoint_step=2)
+            with self.assertRaises(ValueError):
+                select_checkpoint_dir(cfg, checkpoint_step=1, checkpoint_path=root / "0003")
+
+    def test_historical_checkpoint_aliases_do_not_move_latest_by_default(self) -> None:
+        latest_aliases = checkpoint_artifact_aliases(stage="grpo", step=23, aliases=["grpo"], historical=False)
+        historical_aliases = checkpoint_artifact_aliases(
+            stage="grpo",
+            step=23,
+            aliases=["candidate"],
+            historical=True,
+        )
+
+        self.assertEqual(latest_aliases, ["grpo", "step-0023", "latest"])
+        self.assertEqual(historical_aliases, ["grpo-step-0023", "step-0023", "candidate"])
+        self.assertNotIn("latest", historical_aliases)
 
     def test_stage_gate_rejects_rl_without_agentic_lift(self) -> None:
         criteria = stage_acceptance.Criteria()

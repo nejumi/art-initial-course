@@ -25,11 +25,18 @@ def parse_metadata(values: list[str]) -> dict[str, object]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Log the latest local ART checkpoint as a W&B model artifact.")
+    parser = argparse.ArgumentParser(description="Log a local ART checkpoint as a W&B model artifact.")
     parser.add_argument("--stage", required=True, help="Stage label for the artifact metadata and alias.")
     parser.add_argument("--artifact-name", default=None, help="Optional W&B artifact name.")
     parser.add_argument("--alias", action="append", default=[], help="Additional artifact alias; may be repeated.")
     parser.add_argument("--model-name", default=None, help="ART model name. Defaults to ART_MODEL_NAME from .env/environment.")
+    parser.add_argument("--checkpoint-step", type=int, default=None, help="Log this exact ART checkpoint step instead of the latest.")
+    parser.add_argument("--checkpoint-path", type=Path, default=None, help="Log this explicit ART checkpoint directory instead of the latest.")
+    parser.add_argument(
+        "--include-latest-alias",
+        action="store_true",
+        help="Attach the mutable latest alias even when logging an explicit historical checkpoint.",
+    )
     parser.add_argument("--metadata", action="append", default=[], help="Extra metadata as KEY=JSON_VALUE or KEY=string.")
     parser.add_argument("--no-wait", action="store_true", help="Do not wait for the artifact upload to finish.")
     args = parser.parse_args()
@@ -42,6 +49,9 @@ def main() -> None:
         aliases=args.alias,
         metadata=parse_metadata(args.metadata),
         model_name=args.model_name,
+        checkpoint_step=args.checkpoint_step,
+        checkpoint_path=args.checkpoint_path,
+        include_latest_alias=True if args.include_latest_alias else None,
         wait=not args.no_wait,
     )
     if uri:

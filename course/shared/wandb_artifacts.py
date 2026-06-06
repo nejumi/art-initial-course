@@ -177,6 +177,61 @@ def latest_checkpoint_dir(config: RetailCourseConfig, model_name: str | None = N
     return sorted(candidates, key=lambda path: int(path.name))[-1]
 
 
+def checkpoint_dir_for_step(
+    config: RetailCourseConfig,
+    *,
+    checkpoint_step: int,
+    model_name: str | None = None,
+) -> Path:
+    root = checkpoint_root(config, model_name)
+    if not root.exists():
+        raise FileNotFoundError(f"Missing ART checkpoint root: {root}")
+    checkpoint = root / f"{checkpoint_step:04d}"
+    if not checkpoint.exists() or not checkpoint.is_dir():
+        raise FileNotFoundError(f"Missing ART checkpoint step {checkpoint_step:04d}: {checkpoint}")
+    return checkpoint
+
+
+def select_checkpoint_dir(
+    config: RetailCourseConfig,
+    *,
+    model_name: str | None = None,
+    checkpoint_step: int | None = None,
+    checkpoint_path: Path | str | None = None,
+) -> Path:
+    if checkpoint_step is not None and checkpoint_path is not None:
+        raise ValueError("Set only one of checkpoint_step or checkpoint_path.")
+    if checkpoint_path is not None:
+        checkpoint = Path(checkpoint_path)
+        if not checkpoint.exists() or not checkpoint.is_dir():
+            raise FileNotFoundError(f"Missing ART checkpoint path: {checkpoint}")
+        if not checkpoint.name.isdigit():
+            raise ValueError(f"Checkpoint path must end with a numeric ART step directory: {checkpoint}")
+        return checkpoint
+    if checkpoint_step is not None:
+        return checkpoint_dir_for_step(config, checkpoint_step=checkpoint_step, model_name=model_name)
+    return latest_checkpoint_dir(config, model_name)
+
+
+def checkpoint_artifact_aliases(
+    *,
+    stage: str,
+    step: int,
+    aliases: Iterable[str] = (),
+    historical: bool = False,
+    include_latest_alias: bool | None = None,
+) -> list[str]:
+    safe_stage = artifact_safe_name(stage)
+    include_latest = (not historical) if include_latest_alias is None else include_latest_alias
+    if historical:
+        base_aliases = [f"{safe_stage}-step-{step:04d}", f"step-{step:04d}", *aliases]
+    else:
+        base_aliases = [safe_stage, f"step-{step:04d}", *aliases]
+    if include_latest:
+        base_aliases.append("latest")
+    return list(dict.fromkeys(base_aliases))
+
+
 def log_checkpoint_artifact(
     config: RetailCourseConfig,
     *,
@@ -186,6 +241,9 @@ def log_checkpoint_artifact(
     metadata: dict[str, Any] | None = None,
     job_type: str = "model-checkpoint",
     model_name: str | None = None,
+    checkpoint_step: int | None = None,
+    checkpoint_path: Path | str | None = None,
+    include_latest_alias: bool | None = None,
     wait: bool = True,
 ) -> str | None:
     try:
@@ -198,14 +256,26 @@ def log_checkpoint_artifact(
         print("W&B disabled; skipping checkpoint artifact logging.")
         return None
 
-    checkpoint = latest_checkpoint_dir(config, model_name)
+    checkpoint = select_checkpoint_dir(
+        config,
+        model_name=model_name,
+        checkpoint_step=checkpoint_step,
+        checkpoint_path=checkpoint_path,
+    )
     step = int(checkpoint.name)
-    safe_stage = artifact_safe_name(stage)
+    historical = checkpoint_step is not None or checkpoint_path is not None
     safe_name = artifact_safe_name(artifact_name or f"{model_name or config.model_name}-checkpoint")
-    alias_list = list(dict.fromkeys([safe_stage, f"step-{step:04d}", *aliases, "latest"]))
+    alias_list = checkpoint_artifact_aliases(
+        stage=stage,
+        step=step,
+        aliases=aliases,
+        historical=historical,
+        include_latest_alias=include_latest_alias,
+    )
     base_metadata: dict[str, Any] = {
         "task": "retail-support-agent",
         "stage": stage,
+        "historical_checkpoint": historical,
         "art_model_name": model_name or config.model_name,
         "art_project": config.project,
         "art_path": str(config.art_path),
@@ -223,7 +293,7 @@ def log_checkpoint_artifact(
     artifact = wandb.Artifact(
         safe_name,
         type="model",
-        description=f"ART LoRA checkpoint for {config.model_name} at stage {stage}.",
+        description=f"ART LoRA checkpoint for {model_name or config.model_name} at stage {stage}.",
         metadata=base_metadata,
     )
     artifact.add_dir(str(checkpoint))

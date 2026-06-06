@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -58,13 +60,63 @@ def load_cached_split(data_dir: str | Path, split: str, *, limit: int | None = N
 def load_hf_split(dataset_id: str, split: str, *, limit: int | None = None) -> list[dict[str, Any]]:
     try:
         from datasets import load_dataset
-    except ImportError as exc:
-        raise RuntimeError("Install the datasets package to download the retail data.") from exc
-    dataset = load_dataset(dataset_id, split=split)
+    except ImportError:
+        return load_hf_split_via_viewer(dataset_id, split, limit=limit)
+    try:
+        dataset = load_dataset(dataset_id, split=split)
+    except Exception:
+        return load_hf_split_via_viewer(dataset_id, split, limit=limit)
     rows: list[dict[str, Any]] = []
     for i, row in enumerate(dataset):
         rows.append(normalize_record(dict(row), split=split, index=i))
         if limit is not None and len(rows) >= limit:
+            break
+    return rows
+
+
+def _dataset_viewer_json(endpoint: str, **params: Any) -> dict[str, Any]:
+    query = urllib.parse.urlencode(params)
+    url = f"https://datasets-server.huggingface.co/{endpoint}?{query}"
+    with urllib.request.urlopen(url, timeout=60) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _viewer_config_for_split(dataset_id: str, split: str) -> str:
+    data = _dataset_viewer_json("splits", dataset=dataset_id)
+    for item in data.get("splits") or []:
+        if item.get("split") == split:
+            return str(item.get("config") or "default")
+    return "default"
+
+
+def load_hf_split_via_viewer(dataset_id: str, split: str, *, limit: int | None = None) -> list[dict[str, Any]]:
+    config = _viewer_config_for_split(dataset_id, split)
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    page_size = 100
+    while True:
+        length = page_size if limit is None else min(page_size, max(0, limit - len(rows)))
+        if length <= 0:
+            break
+        data = _dataset_viewer_json(
+            "rows",
+            dataset=dataset_id,
+            config=config,
+            split=split,
+            offset=offset,
+            length=length,
+        )
+        page = data.get("rows") or []
+        if not page:
+            break
+        for item in page:
+            row = item.get("row", item)
+            rows.append(normalize_record(dict(row), split=split, index=len(rows)))
+            if limit is not None and len(rows) >= limit:
+                break
+        total = data.get("num_rows_total")
+        offset += len(page)
+        if (limit is not None and len(rows) >= limit) or (total is not None and offset >= int(total)):
             break
     return rows
 

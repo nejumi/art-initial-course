@@ -33,6 +33,7 @@ async def main_async() -> None:
     parser.add_argument("--judge-model", default="openai/gpt-5.5")
     parser.add_argument("--judge-effort", default="medium", choices=["low", "medium", "high", "xhigh"])
     parser.add_argument("--seed", type=int, default=11)
+    parser.add_argument("--gpu-cost-per-hour-usd", type=float, default=None)
     parser.add_argument("--weave", action="store_true", help="Trace rollouts to Weave during this run.")
     args = parser.parse_args()
 
@@ -46,7 +47,7 @@ async def main_async() -> None:
     scenarios = scenarios_from_records(records, split=args.split)
     rng = random.Random(args.seed)
 
-    backend = make_local_backend(cfg.art_path)
+    backend = make_local_backend(cfg.art_path, gpu_cost_per_hour_usd=args.gpu_cost_per_hour_usd)
     model = make_trainable_model(cfg)
     await model.register(backend)
 

@@ -44,7 +44,7 @@ Use `ART_MODEL_PROFILE` for common classroom hardware profiles, or `ART_BASE_MOD
 
 ```bash
 # Constrained local GPU / compatibility smoke tests.
-export ART_MODEL_PROFILE=tiny       # LiquidAI/LFM2.5-1.2B-Thinking
+export ART_MODEL_PROFILE=tiny       # Qwen/Qwen3-0.6B
 
 # Main hands-on path.
 export ART_MODEL_PROFILE=standard   # OpenPipe/Qwen3-14B-Instruct
@@ -56,7 +56,7 @@ export ART_MODEL_PROFILE=moe        # Qwen/Qwen3-30B-A3B-Instruct-2507
 export ART_BASE_MODEL=LiquidAI/LFM2.5-1.2B-Thinking
 ```
 
-`tiny` is intended to make setup and short smoke tests accessible on smaller machines. Before using it for the full RL lab, run the setup check and a short SFT/RL smoke run because ART backend compatibility depends on the model architecture, tokenizer, vLLM, and LoRA trainer path.
+`tiny` is intended to make setup and short smoke tests accessible on smaller machines while staying on an ART-supported Qwen3 dense model path. Use `ART_BASE_MODEL` for experimental local models such as LFM2.5, then run the setup check and a short SFT/RL smoke run before relying on them for the full RL lab because ART backend compatibility depends on the model architecture, tokenizer, vLLM, and LoRA trainer path.
 
 RULER judge selection is separate from the trainable model. It defaults to `openai/gpt-5.5` with medium reasoning effort in `course/05_ruler/train_with_ruler.py`.
 

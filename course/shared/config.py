@@ -26,14 +26,14 @@ DEFAULT_DATA_DIR = PROJECT_ROOT / "data" / "retail"
 DEFAULT_MODEL_PROFILE = "standard"
 
 MODEL_PROFILES: dict[str, str] = {
-    "tiny": "LiquidAI/LFM2.5-1.2B-Thinking",
+    "tiny": "Qwen/Qwen3-0.6B",
     "standard": "OpenPipe/Qwen3-14B-Instruct",
     "serverless": "OpenPipe/Qwen3-14B-Instruct",
     "moe": "Qwen/Qwen3-30B-A3B-Instruct-2507",
 }
 
 MODEL_PROFILE_NOTES: dict[str, str] = {
-    "tiny": "1.2B local smoke-test profile for constrained GPUs; validate ART trainer compatibility before relying on it for RL.",
+    "tiny": "ART-supported 0.6B local profile for constrained GPUs and fast course validation.",
     "standard": "Default local-H100/course profile used by the main hands-on path.",
     "serverless": "W&B Serverless RL compatible 14B profile for managed training demos.",
     "moe": "Larger Serverless/Megatron-oriented profile for scaling discussion and advanced labs.",

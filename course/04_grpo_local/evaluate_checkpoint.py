@@ -21,6 +21,7 @@ async def main_async() -> None:
     parser.add_argument("--split", default="validation")
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--output", default="data/retail/eval_current.jsonl")
+    parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--no-logprobs", action="store_true")
     parser.add_argument("--weave", action="store_true", help="Trace eval rollouts to Weave during this run.")
     args = parser.parse_args()
@@ -43,7 +44,13 @@ async def main_async() -> None:
     groups = []
     rows = []
     for scenario in scenarios:
-        traj = await rollout_retail(model, scenario, split="val", temperature=0.2, request_logprobs=not args.no_logprobs)
+        traj = await rollout_retail(
+            model,
+            scenario,
+            split="val",
+            temperature=args.temperature,
+            request_logprobs=not args.no_logprobs,
+        )
         groups.append(art.TrajectoryGroup([traj]))
         rows.append({"scenario_id": scenario.id, "reward": traj.reward, "metrics": traj.metrics, "logs": traj.logs})
         print(scenario.id, traj.reward, traj.metrics)

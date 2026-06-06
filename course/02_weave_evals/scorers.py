@@ -9,8 +9,8 @@ from typing import Any
 from course.shared.tracing import weave_op
 
 
-def _metric(model_output: dict[str, Any], name: str, default: float = 0.0) -> float:
-    metrics = model_output.get("metrics") or {}
+def _metric(output: dict[str, Any], name: str, default: float = 0.0) -> float:
+    metrics = output.get("metrics") or {}
     try:
         return float(metrics.get(name, default))
     except Exception:
@@ -18,25 +18,25 @@ def _metric(model_output: dict[str, Any], name: str, default: float = 0.0) -> fl
 
 
 @weave_op("task_success_scorer")
-def task_success_scorer(model_output: dict[str, Any], **_: Any) -> dict[str, float]:
-    return {"task_success": _metric(model_output, "task_success")}
+def task_success_scorer(output: dict[str, Any], **_: Any) -> dict[str, float]:
+    return {"task_success": _metric(output, "task_success")}
 
 
 @weave_op("tool_quality_scorer")
-def tool_quality_scorer(model_output: dict[str, Any], **_: Any) -> dict[str, float]:
+def tool_quality_scorer(output: dict[str, Any], **_: Any) -> dict[str, float]:
     return {
-        "tool_name_f1": _metric(model_output, "tool_name_f1"),
-        "tool_order_match": _metric(model_output, "tool_order_match"),
-        "invalid_tool_call": _metric(model_output, "invalid_tool_call"),
+        "tool_name_f1": _metric(output, "tool_name_f1"),
+        "tool_order_match": _metric(output, "tool_order_match"),
+        "invalid_tool_call": _metric(output, "invalid_tool_call"),
     }
 
 
 @weave_op("response_quality_scorer")
-def response_quality_scorer(model_output: dict[str, Any], **_: Any) -> dict[str, float]:
+def response_quality_scorer(output: dict[str, Any], **_: Any) -> dict[str, float]:
     return {
-        "final_text_f1": _metric(model_output, "final_text_f1"),
-        "has_final_response": _metric(model_output, "has_final_response"),
-        "turn_count": _metric(model_output, "turn_count"),
+        "final_text_f1": _metric(output, "final_text_f1"),
+        "has_final_response": _metric(output, "has_final_response"),
+        "turn_count": _metric(output, "turn_count"),
     }
 
 

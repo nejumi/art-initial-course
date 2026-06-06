@@ -98,6 +98,14 @@ API smoke test:
 - RLは「エラーなく回る」では合格にしない。group内reward variance、winner-minus-loser差分、zero-variance group filter、state-action attempt/reached rate、bad/missing state-action rateをW&Bに出し、GRPO/GSPOが実際に学習信号を受けていることを確認する。
 - 最終的な期待結果表は、フル再実行後にW&B Artifacts/Weave tracesと紐づく横持ちテーブルへ差し替える。汚れた探索projectのログは研究記録として残し、共有用sample projectは別projectに再実行して作る。
 
+SFT設計で巨人の肩に乗るポイント:
+
+- AReaL/SEA系の前例に合わせ、`SFT -> verifier-based GRPO/GSPO` を基本形にする。SFTはagentic RLの代替ではなく、tool-call dialect、policy、初期成功率を整えるためのpolicy initializationとして扱う。
+- CoVeの考え方に合わせ、ただの成功ログではなく、制約・検証器・canonical reward・judge qualityでcleanに確認できる軌跡を優先する。教材では `KermitCO/...retail-traces` の reward-1 / non-memory / blind-strict filter と、unknown tool除去がこの役割を担う。
+- TopoCurateの考え方に合わせ、SFTは「成功しているが多様で、必要なら回復行動も含む」軌跡を使い、RLは「まだ失敗分岐が残り、group-relative advantageが立つ」タスク集合を選ぶ。bridge curriculumは簡単にしすぎず、no-signal group diagnosticsで難易度を監視する。
+- 次アクションSFTを主軸にし、full-dialog SFTは教育用baselineに留める。長いfull-dialogをそのまま全assistant turnでmaskすると、前のassistant行動まで重複監督して、W&B上のloss改善と実際のagentic改善がズレやすい。
+- SFT採用条件はlossではなく、Weave eval上の `outcome_success`, `task_success`, `state_action_sequence_match`, `bad_state_action`, `missing_state_action`, tool-call F1/argument matchで判断する。
+
 学習題材:
 
 - メイン題材は「Retail Customer Support Agent」

@@ -12,6 +12,8 @@ This lab intentionally separates three ideas that are easy to conflate:
 - [Multi-Turn Reinforcement Learning for Tool-Calling Agents with Iterative Reward Calibration](https://arxiv.org/abs/2604.02869) reports that naive dense turn rewards can degrade performance. The useful recipe is to keep sparse outcome rewards as a baseline, avoid positive reward for non-discriminative read-only lookups, penalize bad state-changing actions, and calibrate shaping against rollout data.
 - [AReaL-SEA](https://huggingface.co/inclusionAI/AReaL-SEA-235B-A22B) trains multi-turn tool agents with SFT followed by verifiable-reward RL on tau2-style synthetic data. The important SFT lesson is not "copy arbitrary traces"; it is "start from successful, executable, filtered trajectories that match the inference tool-call dialect."
 - [From Self-Evolving Synthetic Data to Verifiable-Reward RL](https://arxiv.org/abs/2601.22607) reports a recipe that fine-tunes before GRPO-style agent RL, uses trajectory-level group-relative advantages, filters no-signal groups, and scores final state with verifiable outcome rewards. Their public dataset has separate `sft` and `rl` splits; the course uses the SFT split as an open warm-start source and keeps the RL split as a pointer for the official tau2-runtime extension.
+- [CoVe](https://arxiv.org/abs/2603.01940) is a useful SFT-data-design precedent: define task constraints first, use those constraints both to synthesize trajectories and to verify their correctness, then train on trajectories that pass the verifier rather than on arbitrary successful-looking transcripts. For this course, the analog is to keep canonical-reward-1 traces, reject memory-injected or unknown-tool rows, and preserve explicit state/action diagnostics.
+- [TopoCurate](https://arxiv.org/abs/2603.01714) argues that outcome filtering alone is not enough for tool-use SFT. Its useful classroom takeaway is to prefer trajectories that are correct, efficient, diverse, and sometimes include recoverable detours; for RL, prefer tasks that still have enough error branches to create gradient signal. The bridge curriculum and no-signal group diagnostics are the lightweight version of that idea.
 - [Qwen3-4B-tau2-grpo-v1](https://huggingface.co/Jarrodbarnes/Qwen3-4B-tau2-grpo-v1) is a useful public worked example: the model card reports a progressive SFT -> RFT -> GRPO recipe, 21 GRPO optimizer steps, turn-level reward shaping from tau2 reward info, a local training user simulator, and a GPT-4.1-mini eval user simulator. This is not the course's target model, but it validates the overall shape of the lab.
 - [MUA-RL](https://arxiv.org/abs/2508.18669) explicitly places an LLM-simulated user inside the RL loop for multi-turn tool-use agents. That supports the course decision to use LLM/user-simulator rollouts for advanced tau2 extensions, while keeping the first hands-on pass on a deterministic lightweight replay environment.
 
@@ -24,6 +26,24 @@ The resulting course recipe is intentionally conservative:
 5. Drop no-signal reward groups before optimizer steps.
 6. Validate RL against SFT on held-out rollouts, not just on train-step reward.
 7. Publish W&B artifact lineage and Weave traces/evals for every stage.
+
+## SFT Data Curation Principles
+
+The course treats SFT as policy initialization, not as a transcript-copying exercise. A strong agentic-RL parent should learn the wire format, tool schemas, policy constraints, and the first consequential state-changing actions while still leaving room for RL to improve outcome selection and recovery behavior.
+
+Use this priority order when building a workshop SFT mix:
+
+1. Verifier-clean next-action rows from the local curriculum.
+2. Public teacher rows with explicit per-step quality scores.
+3. Public tau2-style rows whose tool dialect can be normalized without lossy string surgery.
+4. Successful full trajectories only after filtering and expansion to next-action rows.
+
+Avoid these SFT anti-patterns:
+
+- Training on every assistant turn from a long full-dialog trace when the prior assistant turns are meant to be context only.
+- Mixing tool-call dialects, reasoning tags, and unknown tools in the same SFT file.
+- Overfitting only the shortest or easiest successful traces; this can raise SFT eval while starving RL of useful error branches.
+- Promoting a checkpoint based only on loss. The acceptance gate must also inspect outcome, state-changing action correctness, missing/bad action rates, and Weave traces.
 
 ## Course Implementation
 

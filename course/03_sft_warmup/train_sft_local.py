@@ -15,7 +15,8 @@ from typing import Any
 
 try:
     import unsloth  # noqa: F401
-except ImportError:
+except Exception as exc:
+    print(f"Unsloth import skipped during module load: {exc}")
     unsloth = None  # type: ignore[assignment]
 
 from course.shared.art_compat import make_local_backend, make_trainable_model, register_trainable_model

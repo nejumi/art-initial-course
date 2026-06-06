@@ -141,6 +141,7 @@ The runbook writes `checkpoint_acceptance.md` and `checkpoint_acceptance.json` a
 - RL should improve reward by at least 0.05 versus SFT.
 - RL should improve at least one agentic metric (`outcome_success`, `task_success`, or `state_action_sequence_match`) by at least 0.05 versus SFT.
 - RL should reduce at least one state-action error metric (`bad_state_action` or `missing_state_action`) by at least 0.05 versus SFT.
+- RL should preserve at least 75% of deterministic SFT `outcome_success` wins when the SFT parent has any wins. This catches success churn: a branch that loses many SFT successes and merely finds different isolated wins is not yet a convincing workshop result, even if the average happens to move.
 
 Rejecting a stage is a useful result. It means the class should inspect Weave traces, improve the warm start or curriculum, and rerun before presenting the table as expected workshop performance.
 

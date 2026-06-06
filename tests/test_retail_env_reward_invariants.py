@@ -502,6 +502,54 @@ class RetailRewardInvariantTests(unittest.TestCase):
         self.assertEqual(decision["decision"], "accept")
         self.assertGreater(decision["deltas"]["reward"], 0.0)
 
+    def test_stage_gate_rejects_rl_with_success_churn(self) -> None:
+        criteria = stage_acceptance.Criteria(rl_min_retained_sft_outcome_success_rate=0.75)
+        sft = {
+            "stage": "sft_anchor",
+            "reward": -0.15,
+            "outcome_success": 0.20,
+            "task_success": 0.08,
+            "state_action_sequence_match": 0.16,
+            "bad_state_action": 0.30,
+            "missing_state_action": 1.00,
+        }
+        rl = {
+            "stage": "grpo",
+            "reward": -0.05,
+            "outcome_success": 0.28,
+            "task_success": 0.16,
+            "state_action_sequence_match": 0.24,
+            "bad_state_action": 0.20,
+            "missing_state_action": 0.90,
+        }
+        churn = {
+            "reference_successes": 4,
+            "current_successes": 7,
+            "retained_reference_successes": 2,
+            "lost_reference_successes": 2,
+            "new_successes": 5,
+            "retention_rate": 0.5,
+        }
+
+        decision = stage_acceptance.judge_rl_with_churn(rl, sft, criteria, churn=churn)
+
+        self.assertEqual(decision["decision"], "reject")
+        self.assertIn("churned away", decision["reason"])
+        self.assertEqual(decision["outcome_success_churn"]["new_successes"], 5)
+
+    def test_success_churn_counts_retained_lost_and_new_wins(self) -> None:
+        churn = stage_acceptance.success_churn(
+            current={"a": True, "b": False, "c": True, "d": True},
+            reference={"a": True, "b": True, "c": False},
+        )
+
+        self.assertEqual(churn["reference_successes"], 2)
+        self.assertEqual(churn["current_successes"], 3)
+        self.assertEqual(churn["retained_reference_successes"], 1)
+        self.assertEqual(churn["lost_reference_successes"], 1)
+        self.assertEqual(churn["new_successes"], 2)
+        self.assertEqual(churn["retention_rate"], 0.5)
+
     def test_sample_return_tool_is_state_changing(self) -> None:
         scenario = scenario_from_record(sample_records()[1], split="validation", index=0)
         messages = [

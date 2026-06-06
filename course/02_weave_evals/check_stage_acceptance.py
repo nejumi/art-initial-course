@@ -34,6 +34,7 @@ class Criteria:
     rl_min_task_delta: float = 0.05
     rl_min_state_action_delta: float = 0.05
     rl_min_error_reduction: float = 0.05
+    rl_min_retained_sft_outcome_success_rate: float = 0.75
 
 
 def numeric(summary: dict[str, Any], key: str) -> float | None:
@@ -57,6 +58,49 @@ def gte(value: float | None, threshold: float) -> bool:
 
 def lte(value: float | None, threshold: float) -> bool:
     return value is not None and value <= threshold
+
+
+def stage_success_map(path: Path, *, metric: str = "outcome_success") -> dict[str, bool]:
+    rows = compare_checkpoints.read_jsonl(path)
+    success: dict[str, bool] = {}
+    for index, row in enumerate(rows):
+        scenario_id = str(row.get("scenario_id") or f"row-{index}")
+        metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+        try:
+            value = float(metrics.get(metric, 0.0))  # type: ignore[union-attr]
+        except Exception:
+            value = 0.0
+        success[scenario_id] = success.get(scenario_id, False) or value >= 1.0
+    return success
+
+
+def success_churn(current: dict[str, bool], reference: dict[str, bool]) -> dict[str, Any]:
+    scenario_ids = sorted(set(current) | set(reference))
+    retained = 0
+    lost = 0
+    new = 0
+    reference_successes = 0
+    current_successes = 0
+    for scenario_id in scenario_ids:
+        was_success = bool(reference.get(scenario_id))
+        is_success = bool(current.get(scenario_id))
+        reference_successes += int(was_success)
+        current_successes += int(is_success)
+        if was_success and is_success:
+            retained += 1
+        elif was_success and not is_success:
+            lost += 1
+        elif is_success and not was_success:
+            new += 1
+    retention_rate = retained / reference_successes if reference_successes else None
+    return {
+        "reference_successes": reference_successes,
+        "current_successes": current_successes,
+        "retained_reference_successes": retained,
+        "lost_reference_successes": lost,
+        "new_successes": new,
+        "retention_rate": retention_rate,
+    }
 
 
 def judge_sft(summary: dict[str, Any], baseline: dict[str, Any], criteria: Criteria) -> dict[str, Any]:
@@ -91,6 +135,16 @@ def judge_sft(summary: dict[str, Any], baseline: dict[str, Any], criteria: Crite
 
 
 def judge_rl(summary: dict[str, Any], sft: dict[str, Any], criteria: Criteria) -> dict[str, Any]:
+    return judge_rl_with_churn(summary, sft, criteria, churn=None)
+
+
+def judge_rl_with_churn(
+    summary: dict[str, Any],
+    sft: dict[str, Any],
+    criteria: Criteria,
+    *,
+    churn: dict[str, Any] | None,
+) -> dict[str, Any]:
     reward_delta = delta(summary, sft, "reward")
     outcome_delta = delta(summary, sft, "outcome_success")
     task_delta = delta(summary, sft, "task_success")
@@ -106,7 +160,13 @@ def judge_rl(summary: dict[str, Any], sft: dict[str, Any], criteria: Criteria) -
         lte(bad_state_delta, -criteria.rl_min_error_reduction)
         or lte(missing_delta, -criteria.rl_min_error_reduction)
     )
-    accepted = gte(reward_delta, criteria.rl_min_reward_delta) and performance_lift and error_lift
+    retention_rate = churn.get("retention_rate") if churn else None
+    retention_ok = (
+        retention_rate is None
+        or not (churn or {}).get("reference_successes")
+        or gte(retention_rate, criteria.rl_min_retained_sft_outcome_success_rate)
+    )
+    accepted = gte(reward_delta, criteria.rl_min_reward_delta) and performance_lift and error_lift and retention_ok
     reasons: list[str] = []
     if not gte(reward_delta, criteria.rl_min_reward_delta):
         reasons.append("reward did not clear the RL delta gate")
@@ -114,6 +174,8 @@ def judge_rl(summary: dict[str, Any], sft: dict[str, Any], criteria: Criteria) -
         reasons.append("no outcome/task/state-action lift over SFT")
     if not error_lift:
         reasons.append("no bad-state or missing-state error reduction over SFT")
+    if not retention_ok:
+        reasons.append("RL churned away too many SFT outcome successes")
     if accepted:
         reasons.append("RL branch improves the SFT parent under the configured gate")
     return {
@@ -122,6 +184,7 @@ def judge_rl(summary: dict[str, Any], sft: dict[str, Any], criteria: Criteria) -
         "reference_stage": sft.get("stage"),
         "reason": "; ".join(reasons),
         "deltas": {key: delta(summary, sft, key) for key in PRIMARY_KEYS},
+        "outcome_success_churn": churn or {},
     }
 
 
@@ -142,17 +205,26 @@ def markdown_report(
         f"- RL must improve reward by at least `{criteria.rl_min_reward_delta:.4f}` versus SFT.",
         f"- RL must improve at least one of outcome, task, or state-action sequence metrics versus SFT.",
         f"- RL must reduce either bad-state or missing-state errors versus SFT.",
+        f"- RL must retain at least `{criteria.rl_min_retained_sft_outcome_success_rate:.4f}` of deterministic SFT `outcome_success` wins when SFT has any wins.",
         "",
         "## Decisions",
         "",
-        "| stage | reference | decision | reason | delta_reward | delta_outcome | delta_task | delta_state_seq | delta_bad_state | delta_missing_state |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| stage | reference | decision | reason | delta_reward | delta_outcome | delta_task | delta_state_seq | delta_bad_state | delta_missing_state | retained_sft_wins | lost_sft_wins | new_wins | retention_rate |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for decision in decisions:
         deltas = decision["deltas"]
+        churn = decision.get("outcome_success_churn") or {}
         def fmt(key: str) -> str:
             value = deltas.get(key)
             return "" if value is None else f"{value:+.4f}"
+        def churn_fmt(key: str) -> str:
+            value = churn.get(key)
+            if value is None:
+                return ""
+            if isinstance(value, float):
+                return f"{value:.4f}"
+            return str(value)
 
         lines.append(
             "| "
@@ -168,6 +240,10 @@ def markdown_report(
                     fmt("state_action_sequence_match"),
                     fmt("bad_state_action"),
                     fmt("missing_state_action"),
+                    churn_fmt("retained_reference_successes"),
+                    churn_fmt("lost_reference_successes"),
+                    churn_fmt("new_successes"),
+                    churn_fmt("retention_rate"),
                 ]
             )
             + " |"
@@ -218,6 +294,7 @@ def main() -> None:
     parser.add_argument("--rl-min-task-delta", type=float, default=0.05)
     parser.add_argument("--rl-min-state-action-delta", type=float, default=0.05)
     parser.add_argument("--rl-min-error-reduction", type=float, default=0.05)
+    parser.add_argument("--rl-min-retained-sft-outcome-success-rate", type=float, default=0.75)
     args = parser.parse_args()
 
     if len(args.stages) != len(args.paths):
@@ -230,6 +307,7 @@ def main() -> None:
         rl_min_task_delta=args.rl_min_task_delta,
         rl_min_state_action_delta=args.rl_min_state_action_delta,
         rl_min_error_reduction=args.rl_min_error_reduction,
+        rl_min_retained_sft_outcome_success_rate=args.rl_min_retained_sft_outcome_success_rate,
     )
     summaries = [
         summarize(Path(path), stage=stage, model=args.model)
@@ -243,12 +321,23 @@ def main() -> None:
     if sft is None:
         raise SystemExit(f"Missing SFT stage {args.sft_stage!r}")
 
+    path_by_stage = {stage: Path(path) for path, stage in zip(args.paths, args.stages, strict=True)}
+    sft_successes = stage_success_map(path_by_stage[args.sft_stage])
+
     decisions = [judge_sft(sft, baseline, criteria)]
     for summary in summaries:
         stage = str(summary.get("stage"))
         if stage in {args.baseline_stage, args.sft_stage}:
             continue
-        decisions.append(judge_rl(summary, sft, criteria))
+        stage_successes = stage_success_map(path_by_stage[stage])
+        decisions.append(
+            judge_rl_with_churn(
+                summary,
+                sft,
+                criteria,
+                churn=success_churn(stage_successes, sft_successes),
+            )
+        )
 
     report = {
         "criteria": criteria.__dict__,

@@ -215,6 +215,7 @@ Training scripts use W&B Artifacts and Weave Evaluations for lineage:
 - GRPO, GSPO, and RULER runs call `use_artifact` on the SFT checkpoint and log their own branch checkpoint artifacts.
 - Eval runs can call `use_artifact` on both the dataset and the evaluated checkpoint, while Weave stores rollout traces.
 - After checkpoint comparison, the runbook publishes each cached JSONL result as a Weave Evaluation using the same scorer set, so instructors can inspect both trace-level behavior and stage-level eval summaries without rerunning rollouts.
+- `course/07_models_registry_weave/inspect_wandb_lineage.py` can verify artifact aliases, metadata, and logged/used relationships with the W&B Public API after a full run.
 
 When a long RL run peaks before the final step, log the stable intermediate checkpoint without moving the mutable `latest` alias:
 

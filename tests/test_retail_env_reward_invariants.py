@@ -28,6 +28,7 @@ cached_weave_eval = importlib.import_module("course.02_weave_evals.evaluate_cach
 stage_acceptance = importlib.import_module("course.02_weave_evals.check_stage_acceptance")
 checkpoint_candidate = importlib.import_module("course.02_weave_evals.select_checkpoint_candidate")
 fork_checkpoint = importlib.import_module("course.08_enterprise_ops.fork_checkpoint")
+wandb_lineage = importlib.import_module("course.07_models_registry_weave.inspect_wandb_lineage")
 
 
 def assistant_tool_call(name: str, arguments: dict[str, object]) -> dict[str, object]:
@@ -407,6 +408,32 @@ class RetailRewardInvariantTests(unittest.TestCase):
             self.assertEqual(row["metrics"]["data/step_reward_mean"], 0.5)
             self.assertIsNone(row["metrics"]["nan"])
             self.assertEqual(row["checkpoint"], "checkpoints/0023")
+
+    def test_wandb_lineage_qualifies_local_artifact_names(self) -> None:
+        self.assertEqual(
+            wandb_lineage.qualify_artifact_uri(
+                "retail-model-checkpoint:sft",
+                entity="team",
+                project="proj",
+            ),
+            "team/proj/retail-model-checkpoint:sft",
+        )
+        self.assertEqual(
+            wandb_lineage.qualify_artifact_uri(
+                "team/proj/retail-model-checkpoint:sft",
+                entity="other",
+                project="unused",
+            ),
+            "team/proj/retail-model-checkpoint:sft",
+        )
+        self.assertEqual(
+            wandb_lineage.qualify_artifact_uri(
+                "retail-model-checkpoint",
+                entity=None,
+                project="proj",
+            ),
+            "proj/retail-model-checkpoint:latest",
+        )
 
     def test_select_checkpoint_candidate_ignores_skipped_rows(self) -> None:
         rows = [

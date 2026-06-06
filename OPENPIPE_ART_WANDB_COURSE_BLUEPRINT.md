@@ -81,11 +81,20 @@ API smoke test:
 
 モデル選択:
 
-- `ART_MODEL_PROFILE=tiny`: `LiquidAI/LFM2.5-1.2B-Thinking`。小さなGPUやCPU寄り環境でのsetup/SFT/RL smoke test用。ART LocalBackendで本格RLに使う前に互換性を確認する。
-- `ART_MODEL_PROFILE=standard`: `OpenPipe/Qwen3-14B-Instruct`。メインハンズオンの基準モデル。
+- `ART_MODEL_PROFILE=tiny`: `Qwen/Qwen3-0.6B`。小さなGPUやCPU寄り環境でのsetup/SFT/RL smoke test用。性能改善の説得力ではなく、教材の操作手順を低コストに確認するためのプロファイル。
+- `ART_MODEL_PROFILE=standard`: `LiquidAI/LFM2.5-8B-A1B`。H100を想定したメインハンズオンの基準モデル。2026-06-06時点の実測では、SFTでtask success、GRPOでscalar rewardの改善を見せられる。
+- `ART_MODEL_PROFILE=openpipe`: `OpenPipe/Qwen3-14B-Instruct`。OpenPipe/Qwen系の互換性比較やmanaged trainingの話題に使う。
 - `ART_MODEL_PROFILE=serverless`: `OpenPipe/Qwen3-14B-Instruct`。W&B Serverless RLの軽い比較デモ用。
 - `ART_MODEL_PROFILE=moe`: `Qwen/Qwen3-30B-A3B-Instruct-2507`。Serverless/Megatron/MoEの発展説明用。
 - `ART_BASE_MODEL` を指定した場合はprofileより優先され、参加者や講師が任意のHF/vLLM互換モデルへ差し替えられる。
+
+実測済みの教材ストーリー:
+
+- Baseline LFM2.5-8B-A1Bはretail tool callingをある程度こなせるため、初期モデルが完全に壊れているtoy exampleにならない。
+- SFT anchorはtask successを `0.1458 -> 0.2083` に改善し、tool orderとfinal text F1も改善する。
+- GRPO 8 stepsはscalar rewardを `0.5102 -> 0.5165` に改善し、task successもbaselineより高い状態を保つ。
+- GSPO 3 stepsはtask success改善を維持しつつtool orderが最も高く、GRPOとの比較題材になる。
+- RULER-GRPOはjudgeを報酬設計に混ぜる章として扱い、短いrunではGSPO/GRPOに近い挙動を見せる。
 
 学習題材:
 

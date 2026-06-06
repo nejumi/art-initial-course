@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .config import config_from_env
 from .retail_env import ReplayRetailEnv
 from .rewards import score_trajectory
 from .schemas import RetailScenario
@@ -16,6 +17,7 @@ async def rollout_retail(
     split: str = "train",
     temperature: float = 0.8,
     max_turns: int | None = None,
+    max_completion_tokens: int | None = None,
     request_logprobs: bool = True,
 ) -> Any:
     import art
@@ -35,6 +37,7 @@ async def rollout_retail(
     env = ReplayRetailEnv(scenario)
     client = model.openai_client()
     turns = max_turns if max_turns is not None else scenario.max_turns
+    completion_budget = max_completion_tokens or config_from_env().rollout_max_completion_tokens
 
     for _ in range(turns):
         request: dict[str, Any] = {
@@ -42,7 +45,7 @@ async def rollout_retail(
             "messages": trajectory.messages(),
             "tools": trajectory.tools,
             "temperature": temperature,
-            "max_completion_tokens": 512,
+            "max_completion_tokens": completion_budget,
         }
         if request_logprobs:
             request["logprobs"] = True

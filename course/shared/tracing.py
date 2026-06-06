@@ -10,12 +10,17 @@ from .config import DEFAULT_PROJECT, PROJECT_ROOT
 F = TypeVar("F", bound=Callable[..., Any])
 
 
+def default_weave_cache_dir() -> Path:
+    suffix = os.getenv("SLURM_JOB_ID") or f"pid-{os.getpid()}"
+    return PROJECT_ROOT / ".art" / "weave_cache" / suffix
+
+
 def init_weave(project: str | None = None) -> Any | None:
     try:
         import weave
     except ImportError:
         return None
-    cache_dir = Path(os.getenv("WEAVE_SERVER_CACHE_DIR", PROJECT_ROOT / ".art" / "weave_cache"))
+    cache_dir = Path(os.getenv("WEAVE_SERVER_CACHE_DIR") or default_weave_cache_dir())
     cache_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("WEAVE_SERVER_CACHE_DIR", str(cache_dir))
     kwargs: dict[str, Any] = {

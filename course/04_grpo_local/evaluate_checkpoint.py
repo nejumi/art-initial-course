@@ -6,13 +6,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import argparse
 import asyncio
+import os
 from pathlib import Path
 
-from course.shared.art_compat import make_local_backend, make_trainable_model
+from course.shared.art_compat import make_local_backend, make_trainable_model, register_trainable_model
 from course.shared.config import config_from_env
 from course.shared.data import load_cached_split, scenarios_from_records, write_jsonl, write_sample_dataset
 from course.shared.rollout import rollout_retail
 from course.shared.tracing import init_weave
+from course.shared.wandb_artifacts import use_wandb_artifact
 
 
 async def main_async() -> None:
@@ -24,6 +26,8 @@ async def main_async() -> None:
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--no-logprobs", action="store_true")
     parser.add_argument("--weave", action="store_true", help="Trace eval rollouts to Weave during this run.")
+    parser.add_argument("--data-artifact", default=None, help="Optional W&B dataset artifact URI to mark as eval input.")
+    parser.add_argument("--model-artifact", default=None, help="Optional W&B model artifact URI for the evaluated checkpoint.")
     args = parser.parse_args()
 
     cfg = config_from_env()
@@ -37,7 +41,25 @@ async def main_async() -> None:
 
     backend = make_local_backend(cfg.art_path)
     model = make_trainable_model(cfg)
-    await model.register(backend)
+    await register_trainable_model(model, backend, cfg)
+    data_artifact = args.data_artifact or os.getenv("RETAIL_DATA_ARTIFACT")
+    model_artifact = args.model_artifact or os.getenv("ART_MODEL_ARTIFACT")
+    if data_artifact:
+        use_wandb_artifact(
+            cfg,
+            data_artifact,
+            artifact_type="dataset",
+            job_type="eval",
+            use_as="eval-data",
+        )
+    if model_artifact:
+        use_wandb_artifact(
+            cfg,
+            model_artifact,
+            artifact_type="model",
+            job_type="eval",
+            use_as="evaluated-checkpoint",
+        )
 
     import art
 

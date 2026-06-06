@@ -20,5 +20,7 @@ Operational checklist:
 - Use team entities and service accounts from the beginning.
 - Keep raw customer payloads out of public projects.
 - Attach dataset artifact, reward version, scorer version, and Weave eval URL to every model artifact.
+- Log local ART LoRA checkpoint directories as W&B `model` artifacts; keep large base model weights external and reference them by `base_model` metadata.
+- Call `use_artifact` for the dataset and parent checkpoint before each SFT/RL/eval stage so W&B shows SFT -> GRPO/GSPO/RULER lineage.
 - Promote only evaluated checkpoints to Registry.
 - Prune local checkpoints after Registry promotion and rollback verification.

@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import argparse
 import asyncio
 
-from course.shared.art_compat import make_local_backend, make_trainable_model
+from course.shared.art_compat import make_local_backend, make_trainable_model, register_trainable_model
 from course.shared.config import config_from_env
 
 
@@ -22,7 +22,7 @@ async def main_async() -> None:
     cfg = config_from_env()
     backend = make_local_backend(cfg.art_path)
     model = make_trainable_model(cfg)
-    await model.register(backend)
+    await register_trainable_model(model, backend, cfg)
     await backend._experimental_fork_checkpoint(
         model,
         from_model=args.from_model,

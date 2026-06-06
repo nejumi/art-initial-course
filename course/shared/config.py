@@ -24,17 +24,24 @@ DEFAULT_PROJECT = os.getenv("WANDB_PROJECT", "openpipe-art-retail")
 DEFAULT_ART_PATH = os.getenv("ART_PATH", str(PROJECT_ROOT / ".art"))
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data" / "retail"
 DEFAULT_MODEL_PROFILE = "standard"
+DEFAULT_ART_MAX_SEQ_LENGTH = 8192
+DEFAULT_VLLM_MAX_MODEL_LEN = 16384
+DEFAULT_VLLM_GPU_MEMORY_UTILIZATION = 0.70
+DEFAULT_VLLM_MAX_NUM_BATCHED_TOKENS = 16384
+DEFAULT_VLLM_MAX_NUM_SEQS = 8
 
 MODEL_PROFILES: dict[str, str] = {
     "tiny": "Qwen/Qwen3-0.6B",
-    "standard": "OpenPipe/Qwen3-14B-Instruct",
+    "standard": "LiquidAI/LFM2.5-8B-A1B",
+    "openpipe": "OpenPipe/Qwen3-14B-Instruct",
     "serverless": "OpenPipe/Qwen3-14B-Instruct",
     "moe": "Qwen/Qwen3-30B-A3B-Instruct-2507",
 }
 
 MODEL_PROFILE_NOTES: dict[str, str] = {
     "tiny": "ART-supported 0.6B local profile for constrained GPUs and fast course validation.",
-    "standard": "Default local-H100/course profile used by the main hands-on path.",
+    "standard": "Validated local-H100/course profile used by the main hands-on path.",
+    "openpipe": "OpenPipe-hosted Qwen3 14B profile for compatibility comparison and managed-training demos.",
     "serverless": "W&B Serverless RL compatible 14B profile for managed training demos.",
     "moe": "Larger Serverless/Megatron-oriented profile for scaling discussion and advanced labs.",
 }
@@ -72,12 +79,49 @@ def bool_env(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def optional_bool_env(name: str) -> bool | None:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return None
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def optional_int_env(name: str) -> int | None:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return None
+    return int(value)
+
+
+def optional_float_env(name: str) -> float | None:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return None
+    return float(value)
+
+
+def default_tool_call_parser(base_model: str | None = None) -> str | None:
+    explicit = os.getenv("ART_TOOL_CALL_PARSER")
+    if explicit is not None:
+        value = explicit.strip()
+        return value or None
+    model_name = base_model or os.getenv("ART_BASE_MODEL") or resolve_base_model()
+    model_name_lower = model_name.lower()
+    if "liquidai/lfm" in model_name_lower or "lfm2" in model_name_lower:
+        return "lfm2"
+    if "qwen3.5" in model_name_lower or "qwen3_5" in model_name_lower:
+        return "qwen3_xml"
+    if "qwen3" in model_name_lower and "vl" not in model_name_lower:
+        return "qwen3_xml"
+    if "gemma-4" in model_name_lower or "gemma4" in model_name_lower:
+        return "gemma4"
+    return None
+
+
 def mask_secret(value: str | None) -> str:
     if not value:
         return "<unset>"
-    if len(value) <= 8:
-        return "***"
-    return value[:4] + "..." + value[-4:]
+    return f"<set:{len(value)} chars>"
 
 
 @dataclass(frozen=True)
@@ -94,6 +138,14 @@ class RetailCourseConfig:
     inference_base_url: str | None = field(default_factory=lambda: os.getenv("INFERENCE_BASE_URL"))
     inference_api_key: str | None = field(default_factory=lambda: os.getenv("INFERENCE_API_KEY") or os.getenv("OPENAI_API_KEY"))
     request_logprobs: bool = field(default_factory=lambda: bool_env("ART_REQUEST_LOGPROBS", True))
+    rollout_max_completion_tokens: int = field(default_factory=lambda: optional_int_env("ART_ROLLOUT_MAX_COMPLETION_TOKENS") or 512)
+    tool_call_parser: str | None = field(default_factory=default_tool_call_parser)
+    art_max_seq_length: int | None = field(default_factory=lambda: optional_int_env("ART_MAX_SEQ_LENGTH") or DEFAULT_ART_MAX_SEQ_LENGTH)
+    vllm_max_model_len: int | None = field(default_factory=lambda: optional_int_env("ART_VLLM_MAX_MODEL_LEN") or DEFAULT_VLLM_MAX_MODEL_LEN)
+    vllm_gpu_memory_utilization: float | None = field(default_factory=lambda: optional_float_env("ART_VLLM_GPU_MEMORY_UTILIZATION") or DEFAULT_VLLM_GPU_MEMORY_UTILIZATION)
+    vllm_max_num_batched_tokens: int | None = field(default_factory=lambda: optional_int_env("ART_VLLM_MAX_NUM_BATCHED_TOKENS") or DEFAULT_VLLM_MAX_NUM_BATCHED_TOKENS)
+    vllm_max_num_seqs: int | None = field(default_factory=lambda: optional_int_env("ART_VLLM_MAX_NUM_SEQS") or DEFAULT_VLLM_MAX_NUM_SEQS)
+    vllm_enforce_eager: bool | None = field(default_factory=lambda: optional_bool_env("ART_VLLM_ENFORCE_EAGER"))
 
 
 def config_from_env() -> RetailCourseConfig:

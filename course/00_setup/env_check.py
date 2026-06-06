@@ -10,6 +10,7 @@ import platform
 import sys
 
 from course.shared.config import COURSE_DOTENV_PATH, DOTENV_LOADED, available_model_profiles, config_from_env, mask_secret
+from course.shared.art_compat import model_internal_config, vllm_engine_args
 
 PACKAGES = ["art", "openpipe-art", "wandb", "weave", "datasets", "torch", "transformers", "openai", "python-dotenv"]
 
@@ -34,6 +35,11 @@ def main() -> None:
     print(".env loaded:", DOTENV_LOADED)
     print("Model profile:", cfg.model_profile)
     print("Base model:", cfg.base_model)
+    print("Rollout max completion tokens:", cfg.rollout_max_completion_tokens)
+    print("Tool call parser:", cfg.tool_call_parser or "<ART/vLLM default>")
+    print("ART max sequence length:", cfg.art_max_seq_length or "<ART default>")
+    print("vLLM engine args:", vllm_engine_args(cfg) or "<ART/vLLM defaults>")
+    print("ART internal config:", model_internal_config(cfg) or "<ART defaults>")
     print("Inference model:", cfg.inference_model_name or os.getenv("OPENAI_MODEL") or "gpt-4.1-mini")
     print("Available profiles:", ", ".join(sorted(available_model_profiles())))
     print("WANDB_API_KEY:", mask_secret(os.getenv("WANDB_API_KEY")))

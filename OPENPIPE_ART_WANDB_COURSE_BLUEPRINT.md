@@ -96,6 +96,7 @@ API smoke test:
 - 現在の本線は、短いbridge curriculumで `next-action SFT -> GRPO branch / GSPO branch` を独立比較し、`tau_irc` 報酬、state-changing action correctness、communication success、proxy outcome success、official tau2 importを横持ち表で検証する流れ。SFT parentが弱い場合は、`amityco/tau-bench-retail-train-next-action-all-step-score-v0.2` の高スコアteacher next-action行を `make_teacher_next_action_sft_jsonl.py` で変換し、bridge next-actionと混ぜたwarm startを使う。
 - SFT checkpointはlossだけでは採用しない。baseline/SFT/RLを同じholdoutでWeave evalし、SFTが少なくともtool-call形式とstate-changing action指標を改善していることを確認してからRL parentにする。
 - RLは「エラーなく回る」では合格にしない。group内reward variance、winner-minus-loser差分、zero-variance group filter、state-action attempt/reached rate、bad/missing state-action rateをW&Bに出し、GRPO/GSPOが実際に学習信号を受けていることを確認する。
+- 長いRL runは単調改善を仮定しない。`train_metrics_<algo>_<suffix>.jsonl` と `select_checkpoint_candidate.py` で候補stepを選び、file-only forkした中間checkpointをheld-out evalとWeave traceで確認してから期待結果に採用する。
 - 最終的な期待結果表は、フル再実行後にW&B Artifacts/Weave tracesと紐づく横持ちテーブルへ差し替える。汚れた探索projectのログは研究記録として残し、共有用sample projectは別projectに再実行して作る。
 
 SFT設計で巨人の肩に乗るポイント:
@@ -644,6 +645,7 @@ Slide 18: Debugging pattern
 - inspect Weave traces
 - identify reward hacking or malformed JSON
 - fork checkpoint before collapse
+- select candidate steps from per-step metrics and validate them on held-out rollouts before promotion
 
 ### Chapter 6 - SFT Warmup
 

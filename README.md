@@ -21,6 +21,7 @@ The course intentionally uses public datasets so a workshop can run end to end w
 | [`lefft/tau-dev-task-retail-v1`](https://huggingface.co/datasets/lefft/tau-dev-task-retail-v1) | Default SFT and evaluation data | Successful retail trajectories already serialized in OpenAI tool-call format | Downloaded by `download_tau_retail.py`; converted to `sft_*.jsonl` |
 | [`amityco/tau-bench-retail-train-next-action-all-step-score-v0.2`](https://huggingface.co/datasets/amityco/tau-bench-retail-train-next-action-all-step-score-v0.2) | Optional teacher next-action SFT | Step-level retail tool-call rows with candidate scores | Converted by `make_teacher_next_action_sft_jsonl.py`; can be mixed with bridge next-action rows |
 | [`inclusionAI/AReaL-tau2-data`](https://huggingface.co/datasets/inclusionAI/AReaL-tau2-data) | Advanced next-action SFT option | Mirrors recent tau2-style SFT + verifiable-reward RL workflows | Converted by `make_areal_retail_sft_jsonl.py`; strips thinking fields and normalizes tool calls |
+| [`Jarrodbarnes/Qwen3-4B-tau2-grpo-v1`](https://huggingface.co/Jarrodbarnes/Qwen3-4B-tau2-grpo-v1) | Prior-art reference | Public model card documents SFT -> RFT -> GRPO, turn-level shaping, and tau2 eval settings | Not used as course weights by default; informs the training/eval recipe |
 
 Full-dialog SFT is easy to explain, but it can over-supervise long dialogue style and final responses. Next-action SFT is the stronger path when we want to align with modern agent training recipes and avoid training on every prior assistant action repeatedly.
 
@@ -239,6 +240,7 @@ Current tau-style diagnostics show that naive full-trajectory SFT on the small c
 W&B Artifacts are logged for the dataset, the SFT checkpoint, and each RL branch checkpoint. The comparison script logs a horizontal W&B table with columns such as `model`, `stage`, `model_artifact_path`, `reward`, `task_success`, and delta metrics, while Weave stores rollout traces and cached checkpoint Evaluations.
 RL training logs also include signal-quality diagnostics: reward range/std before and after zero-variance filtering, winner-minus-loser gaps for outcome/state-action metrics, state-action attempt/reached rates, and tau-style reward components. These columns are meant to prove that GRPO/GSPO is optimizing agentic behavior rather than noise from read-only replay differences.
 The runbook writes both full audit tables (`checkpoint_eval_comparison.md/.csv`) and compact presentation tables (`checkpoint_eval_summary.md/.csv`).
+It also writes `checkpoint_acceptance.md/.json`. This conservative gate rejects a stage unless SFT preserves baseline task/outcome metrics and each RL branch improves over the SFT parent on reward plus at least one agentic success metric and one state-action error metric. Use the gate as a finalization checklist before copying expected results into this README.
 
 ## Lab Map
 

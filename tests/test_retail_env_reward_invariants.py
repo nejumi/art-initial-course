@@ -20,6 +20,7 @@ record_to_next_action_examples = importlib.import_module(
 teacher_sft = importlib.import_module("course.03_sft_warmup.make_teacher_next_action_sft_jsonl")
 areal_sft = importlib.import_module("course.03_sft_warmup.make_areal_retail_sft_jsonl")
 cached_weave_eval = importlib.import_module("course.02_weave_evals.evaluate_cached_checkpoint")
+stage_acceptance = importlib.import_module("course.02_weave_evals.check_stage_acceptance")
 
 
 def assistant_tool_call(name: str, arguments: dict[str, object]) -> dict[str, object]:
@@ -244,6 +245,58 @@ class RetailRewardInvariantTests(unittest.TestCase):
         self.assertEqual(dataset_rows[0]["model_artifact_path"], "retail-support-agent-checkpoint:grpo")
         self.assertEqual(outputs[row_id]["metrics"]["outcome_success"], 1.0)
         self.assertEqual(outputs[row_id]["metadata"]["model"], "LiquidAI/LFM2.5-8B-A1B")
+
+    def test_stage_gate_rejects_rl_without_agentic_lift(self) -> None:
+        criteria = stage_acceptance.Criteria()
+        sft = {
+            "stage": "sft_anchor",
+            "reward": 0.10,
+            "outcome_success": 0.10,
+            "task_success": 0.10,
+            "state_action_sequence_match": 0.20,
+            "bad_state_action": 0.20,
+            "missing_state_action": 0.80,
+        }
+        rl = {
+            "stage": "grpo",
+            "reward": 0.14,
+            "outcome_success": 0.10,
+            "task_success": 0.10,
+            "state_action_sequence_match": 0.20,
+            "bad_state_action": 0.20,
+            "missing_state_action": 0.80,
+        }
+
+        decision = stage_acceptance.judge_rl(rl, sft, criteria)
+
+        self.assertEqual(decision["decision"], "reject")
+        self.assertIn("no outcome/task/state-action lift", decision["reason"])
+
+    def test_stage_gate_accepts_rl_with_metric_and_error_lift(self) -> None:
+        criteria = stage_acceptance.Criteria()
+        sft = {
+            "stage": "sft_anchor",
+            "reward": -0.15,
+            "outcome_success": 0.10,
+            "task_success": 0.08,
+            "state_action_sequence_match": 0.16,
+            "bad_state_action": 0.20,
+            "missing_state_action": 1.00,
+        }
+        rl = {
+            "stage": "grpo",
+            "reward": -0.09,
+            "outcome_success": 0.16,
+            "task_success": 0.14,
+            "state_action_sequence_match": 0.22,
+            "bad_state_action": 0.10,
+            "missing_state_action": 0.90,
+        }
+
+        decision = stage_acceptance.judge_rl(rl, sft, criteria)
+
+        self.assertEqual(decision["decision"], "accept")
+        self.assertGreater(decision["deltas"]["reward"], 0.0)
 
     def test_sample_return_tool_is_state_changing(self) -> None:
         scenario = scenario_from_record(sample_records()[1], split="validation", index=0)

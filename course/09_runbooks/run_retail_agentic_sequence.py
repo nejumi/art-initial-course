@@ -501,6 +501,25 @@ def compare_results(
     if not args.no_wandb_compare:
         command.append("--wandb")
     run_command("checkpoint comparison", command, env=env, dry_run=args.dry_run)
+    run_command(
+        "stage acceptance gate",
+        [
+            sys.executable,
+            "-B",
+            "course/02_weave_evals/check_stage_acceptance.py",
+            *paths,
+            "--stages",
+            *stages,
+            "--model",
+            args.base_model,
+            "--output-md",
+            path_arg(report_dir / "checkpoint_acceptance.md"),
+            "--output-json",
+            path_arg(report_dir / "checkpoint_acceptance.json"),
+        ],
+        env=env,
+        dry_run=args.dry_run,
+    )
     if not args.no_weave and not args.skip_weave_cached_evals:
         for path, stage, model_artifact in zip(paths, stages, model_artifacts, strict=True):
             weave_command = [

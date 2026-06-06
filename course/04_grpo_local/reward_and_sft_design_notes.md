@@ -11,7 +11,19 @@ This lab intentionally separates three ideas that are easy to conflate:
 - [tau-bench / tau2-bench task evaluation](https://github.com/sierra-research/tau2-bench/blob/main/docs/evaluation.md) scores customer-service tasks by final outcome, not by exact replay of the listed reference actions. In airline, retail, and telecom, `evaluation_criteria.actions` is primarily replayed to derive a target DB state; the official reward basis is generally DB and communication.
 - [Multi-Turn Reinforcement Learning for Tool-Calling Agents with Iterative Reward Calibration](https://arxiv.org/abs/2604.02869) reports that naive dense turn rewards can degrade performance. The useful recipe is to keep sparse outcome rewards as a baseline, avoid positive reward for non-discriminative read-only lookups, penalize bad state-changing actions, and calibrate shaping against rollout data.
 - [AReaL-SEA](https://huggingface.co/inclusionAI/AReaL-SEA-235B-A22B) trains multi-turn tool agents with SFT followed by verifiable-reward RL on tau2-style synthetic data. The important SFT lesson is not "copy arbitrary traces"; it is "start from successful, executable, filtered trajectories that match the inference tool-call dialect."
-- [From Self-Evolving Synthetic Data to Verifiable-Reward RL](https://arxiv.org/abs/2601.22607) reports a recipe that fine-tunes before GRPO-style agent RL, uses trajectory-level group-relative advantages, filters no-signal groups, and scores final state with verifiable outcome rewards. Their reported retail results improve from baseline to SFT and then further with RL, so our hands-on should not accept an SFT parent that degrades outcome metrics.
+- [From Self-Evolving Synthetic Data to Verifiable-Reward RL](https://arxiv.org/abs/2601.22607) reports a recipe that fine-tunes before GRPO-style agent RL, uses trajectory-level group-relative advantages, filters no-signal groups, and scores final state with verifiable outcome rewards. Their public dataset has separate `sft` and `rl` splits; the course uses the SFT split as an open warm-start source and keeps the RL split as a pointer for the official tau2-runtime extension.
+- [Qwen3-4B-tau2-grpo-v1](https://huggingface.co/Jarrodbarnes/Qwen3-4B-tau2-grpo-v1) is a useful public worked example: the model card reports a progressive SFT -> RFT -> GRPO recipe, 21 GRPO optimizer steps, turn-level reward shaping from tau2 reward info, a local training user simulator, and a GPT-4.1-mini eval user simulator. This is not the course's target model, but it validates the overall shape of the lab.
+- [MUA-RL](https://arxiv.org/abs/2508.18669) explicitly places an LLM-simulated user inside the RL loop for multi-turn tool-use agents. That supports the course decision to use LLM/user-simulator rollouts for advanced tau2 extensions, while keeping the first hands-on pass on a deterministic lightweight replay environment.
+
+The resulting course recipe is intentionally conservative:
+
+1. Normalize public SFT data into the same tool-call dialect used at inference.
+2. Train next-action SFT with last-assistant masking and visible W&B loss/checkpoint points.
+3. Evaluate SFT before RL; do not promote a weak SFT parent just because the loss decreased.
+4. Run GRPO/GSPO as independent branches from the same SFT parent.
+5. Drop no-signal reward groups before optimizer steps.
+6. Validate RL against SFT on held-out rollouts, not just on train-step reward.
+7. Publish W&B artifact lineage and Weave traces/evals for every stage.
 
 ## Course Implementation
 
@@ -81,6 +93,15 @@ Start every RL experiment with a diagnostic table:
 - final communication success
 
 If reward variance is near zero or SFT outcome success is far below about 30%, RL is likely optimizing noise. In that case, improve SFT data quality, model choice, prompt/tool-call parser compatibility, or task curriculum before increasing RL steps.
+
+The runbook writes `checkpoint_acceptance.md` and `checkpoint_acceptance.json` after the horizontal comparison. The gate is deliberately stricter than "the script did not crash":
+
+- SFT should not regress `outcome_success` or `task_success` versus baseline.
+- RL should improve reward by at least 0.05 versus SFT.
+- RL should improve at least one agentic metric (`outcome_success`, `task_success`, or `state_action_sequence_match`) by at least 0.05 versus SFT.
+- RL should reduce at least one state-action error metric (`bad_state_action` or `missing_state_action`) by at least 0.05 versus SFT.
+
+Rejecting a stage is a useful result. It means the class should inspect Weave traces, improve the warm start or curriculum, and rerun before presenting the table as expected workshop performance.
 
 The GRPO and GSPO scripts implement dynamic filtering before each training step. They discard groups where every rollout receives the same reward, resample up to `--max-sampling-rounds`, and log:
 

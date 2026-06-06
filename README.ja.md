@@ -47,3 +47,5 @@ sbatch course/09_runbooks/sunk_h100_retail_agentic_sequence.sbatch
 | SFT -> RULER-GRPO, 3 steps | 0.5026 | 0.1875 | 0.7254 | 0.5750 | 0.7292 | 0.2405 |
 
 最終版では、固定済みのtau-style報酬でbaseline、SFT、GRPO、GSPO、RULERを再実行し、W&B ArtifactsとWeave traceを含む横持ち比較表に差し替えます。
+
+runbookは横持ち比較に加えて `checkpoint_acceptance.md/.json` も書きます。SFTがbaselineのtask/outcomeを落としていないこと、RLがSFTに対してrewardとagentic metric、state-action errorの両方で改善していることを確認してから、READMEの期待結果として採用します。

@@ -8,7 +8,7 @@ The main task is a Retail Customer Support Agent based on open retail tool-calli
 
 - `lefft/tau-dev-task-retail-v1` for SFT and workflow validation
 - tau-bench / tau2-bench retail concepts for rollout, reward, and eval design
-- optional tau2-style next-action SFT data from `inclusionAI/AReaL-tau2-data`
+- optional tau2-style next-action SFT data from `amityco/...` and `inclusionAI/AReaL-tau2-data`
 
 The code is structured so the early labs can be inspected without a GPU. Local ART training labs require a CUDA-capable GPU and `openpipe-art[backend]`.
 
@@ -19,8 +19,8 @@ The course intentionally uses public datasets so a workshop can run end to end w
 | Dataset | Main use | Why it is useful | Course handling |
 | --- | --- | --- | --- |
 | [`lefft/tau-dev-task-retail-v1`](https://huggingface.co/datasets/lefft/tau-dev-task-retail-v1) | Default SFT and evaluation data | Successful retail trajectories already serialized in OpenAI tool-call format | Downloaded by `download_tau_retail.py`; converted to `sft_*.jsonl` |
+| [`amityco/tau-bench-retail-train-next-action-all-step-score-v0.2`](https://huggingface.co/datasets/amityco/tau-bench-retail-train-next-action-all-step-score-v0.2) | Optional teacher next-action SFT | Step-level retail tool-call rows with candidate scores | Converted by `make_teacher_next_action_sft_jsonl.py`; can be mixed with bridge next-action rows |
 | [`inclusionAI/AReaL-tau2-data`](https://huggingface.co/datasets/inclusionAI/AReaL-tau2-data) | Advanced next-action SFT option | Mirrors recent tau2-style SFT + verifiable-reward RL workflows | Converted by `make_areal_retail_sft_jsonl.py`; strips thinking fields and normalizes tool calls |
-| [`amityco/tau-bench-retail-train-next-action-all-step-score-v0.2`](https://huggingface.co/datasets/amityco/tau-bench-retail-train-next-action-all-step-score-v0.2) | Reference for step-level teacher data | Shows next-action candidates and scores for retail tool-calling | Used as design reference, not the default training source |
 
 Full-dialog SFT is easy to explain, but it can over-supervise long dialogue style and final responses. Next-action SFT is the stronger path when we want to align with modern agent training recipes and avoid training on every prior assistant action repeatedly.
 
@@ -70,6 +70,23 @@ python course/09_runbooks/run_retail_agentic_sequence.py \
   --rl-algos grpo,gspo
 ```
 
+To strengthen the SFT warm start with public teacher next-action rows:
+
+```bash
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-slug lfm25-8b-a1b-bridge-state1-teacher \
+  --base-model LiquidAI/LFM2.5-8B-A1B \
+  --data-dir data/retail_bridge_state1 \
+  --source-dir data/retail \
+  --data-artifact-name retail-course-data-bridge-state1-teacher \
+  --build-bridge \
+  --include-teacher-sft \
+  --teacher-sft-limit 512 \
+  --sft-max-steps 144 \
+  --rl-steps 32 \
+  --rl-algos grpo,gspo
+```
+
 The runbook defaults to `--continue-on-invalid` for tau-style RL. Unexpected state-changing actions are still penalized, but rollouts continue long enough for final state/action and communication rewards to be observed. Use `--no-continue-on-invalid` only when demonstrating strict replay failure modes.
 For the final course report, add stochastic validation with `--eval-rollouts-per-scenario 4 --eval-temperature 0.2` so `outcome_pass_at_k`, `task_pass_at_k`, and reward variance columns are meaningful. Keep the default deterministic eval for quick instructor checks.
 
@@ -82,13 +99,18 @@ sbatch course/09_runbooks/sunk_h100_retail_agentic_sequence.sbatch
 Advanced SFT data option:
 
 ```bash
+python course/03_sft_warmup/make_teacher_next_action_sft_jsonl.py \
+  --tools-data-dir data/retail_bridge_state1 \
+  --output data/retail_bridge_state1/sft_teacher_retail_next_action.jsonl \
+  --limit 512
+
 python course/03_sft_warmup/make_areal_retail_sft_jsonl.py \
   --tools-data-dir data/retail \
   --output data/retail/sft_areal_retail_next_action.jsonl \
   --limit 200
 ```
 
-The default course path uses compact TAU retail trajectories. The bridge curriculum keeps short successful trajectories with exactly one state-changing action, which is useful for proving that agentic RL can improve a verifiable outcome before moving to the broader retail curriculum. The AReaL converter is provided for advanced experiments that want to align SFT data construction with recent tau2-style multi-turn tool-agent work.
+The default course path uses compact TAU retail trajectories. The bridge curriculum keeps short successful trajectories with exactly one state-changing action, which is useful for proving that agentic RL can improve a verifiable outcome before moving to the broader retail curriculum. The teacher and AReaL converters are provided for stronger warm starts and advanced experiments that want to align SFT data construction with recent tau2-style multi-turn tool-agent work.
 
 Next-action SFT should be trained with last-assistant masking:
 
@@ -135,7 +157,7 @@ SFT also runs a tokenization preflight. By default, rows that exceed `ART_MAX_SE
 Training scripts use W&B Artifacts for lineage:
 
 - `retail-course-data:latest` contains the TAU Retail JSONL splits plus generated `sft_train.jsonl`.
-- Data artifacts include all `sft*.jsonl` files in the data directory, so full-trajectory, next-action, and AReaL-derived SFT variants can be traced.
+- Data artifacts include all `sft*.jsonl` files plus summary JSON files in the data directory, so full-trajectory, next-action, teacher-mixed, and AReaL-derived SFT variants can be traced.
 - SFT logs the latest local ART LoRA checkpoint as `<ART_MODEL_NAME>-checkpoint:sft-anchor`, including the exact `sft_file` and `sft_mask_mode` in checkpoint metadata.
 - GRPO, GSPO, and RULER runs call `use_artifact` on the SFT checkpoint and log their own branch checkpoint artifacts.
 - Eval runs can call `use_artifact` on both the dataset and the evaluated checkpoint, while Weave stores rollout traces.

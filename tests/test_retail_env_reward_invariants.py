@@ -17,6 +17,7 @@ from course.shared.rewards import score_messages
 record_to_next_action_examples = importlib.import_module(
     "course.03_sft_warmup.make_next_action_sft_jsonl"
 ).record_to_next_action_examples
+teacher_sft = importlib.import_module("course.03_sft_warmup.make_teacher_next_action_sft_jsonl")
 
 
 def assistant_tool_call(name: str, arguments: dict[str, object]) -> dict[str, object]:
@@ -58,6 +59,95 @@ class RetailRewardInvariantTests(unittest.TestCase):
             state_action["tool_calls"][0]["function"]["name"],
             "cancel_pending_order",
         )
+
+    def test_teacher_next_action_conversion_uses_final_answer_turn(self) -> None:
+        row = {
+            "sample_idx": 7,
+            "conversations": [
+                {"role": "user", "content": "Please cancel order O-1001."},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_lookup",
+                            "type": "function",
+                            "function": {"name": "get_order_details", "arguments": "{\"order_id\":\"O-1001\"}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_lookup", "content": "{\"status\":\"pending\"}"},
+            ],
+            "answer": [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_cancel",
+                            "type": "function",
+                            "function": {
+                                "name": "cancel_pending_order",
+                                "arguments": "{\"order_id\":\"O-1001\"}",
+                            },
+                        }
+                    ],
+                }
+            ],
+            "total_score": 1.0,
+            "avg_score": 1.0,
+        }
+        tools = sample_records()[0]["tools"]
+
+        example = teacher_sft.convert_teacher_row(
+            row,
+            row_index=0,
+            tools=tools,
+            dataset_id="teacher/example",
+            split="train",
+            drop_unknown_tools=True,
+            min_total_score=1.0,
+            min_avg_score=1.0,
+        )
+
+        self.assertIsNotNone(example)
+        assert example is not None
+        self.assertEqual(example["metadata"]["sft_format"], "teacher-retail-next-action")
+        final_message = example["messages"][-1]
+        self.assertEqual(final_message["role"], "assistant")
+        self.assertEqual(final_message["content"], "")
+        self.assertEqual(final_message["tool_calls"][0]["function"]["name"], "cancel_pending_order")
+
+    def test_teacher_next_action_conversion_drops_unknown_answer_tool(self) -> None:
+        row = {
+            "conversations": [{"role": "user", "content": "Delete my account."}],
+            "answer": [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_delete",
+                            "type": "function",
+                            "function": {"name": "delete_customer_account", "arguments": "{}"},
+                        }
+                    ],
+                }
+            ],
+            "total_score": 1.0,
+            "avg_score": 1.0,
+        }
+
+        example = teacher_sft.convert_teacher_row(
+            row,
+            row_index=0,
+            tools=sample_records()[0]["tools"],
+            dataset_id="teacher/example",
+            split="train",
+            drop_unknown_tools=True,
+            min_total_score=1.0,
+            min_avg_score=1.0,
+        )
+
+        self.assertIsNone(example)
 
     def test_sample_return_tool_is_state_changing(self) -> None:
         scenario = scenario_from_record(sample_records()[1], split="validation", index=0)

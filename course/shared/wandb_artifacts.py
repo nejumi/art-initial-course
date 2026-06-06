@@ -264,6 +264,8 @@ def log_retail_data_artifact(
     ]
     sft_files = sorted(data_dir.glob("sft*.jsonl"))
     files.extend(sft_files)
+    metadata_files = sorted(data_dir.glob("*summary*.json"))
+    files.extend(metadata_files)
     existing = [path for path in files if path.exists()]
     if not existing:
         raise FileNotFoundError(f"No retail JSONL files found in: {data_dir}")

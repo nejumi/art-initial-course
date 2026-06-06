@@ -32,7 +32,7 @@ Public SFT sources used or referenced by the course:
 | --- | --- | --- |
 | `lefft/tau-dev-task-retail-v1` | Successful full-dialog retail trajectories with OpenAI-compatible tool calls | Main open-data source, replay-env validation, and per-turn next-action SFT after expansion |
 | `inclusionAI/AReaL-tau2-data` | tau2-style next-action SFT/RL rows with `messages`, `answer`, and metadata | Advanced SFT data construction and comparison to recent verifiable-reward agent training recipes |
-| `amityco/tau-bench-retail-train-next-action-all-step-score-v0.2` | Retail next-action examples with candidate responses and scores | Design reference for step-level teacher data and potential future last-answer-only SFT |
+| `amityco/tau-bench-retail-train-next-action-all-step-score-v0.2` | Retail next-action examples with candidate responses and scores | Optional public teacher warm start; convert high-score rows and train with last-answer-only SFT |
 | `Jarrodbarnes/tau2-sft-v4-dataset` | Expert tau2 prompts/responses with explicit thinking-tag instructions | Reference only unless reasoning tags and tool dialect are cleaned first |
 
 Before training, normalize demonstrations:
@@ -49,16 +49,21 @@ The course now exposes both formats:
 
 - `make_sft_jsonl.py` writes full-trajectory examples and should use `--sft-mask-mode all-assistant`.
 - `make_next_action_sft_jsonl.py` expands each full trajectory into per-turn next-action rows and should use `--sft-mask-mode last-assistant`.
+- `make_teacher_next_action_sft_jsonl.py` converts scored public teacher next-action rows from `amityco/...all-step-score-v0.2`; use it when the base bridge SFT is too weak for convincing RL.
 - `make_areal_retail_sft_jsonl.py` converts AReaL tau2 retail next-action rows and should also use `--sft-mask-mode last-assistant`.
+- `mix_sft_jsonl.py` mixes bridge, teacher, and advanced SFT sources while preserving source metadata for W&B artifact lineage.
 - `make_bridge_curriculum.py` builds a shorter first RL curriculum from successful trajectories with a bounded number of state-changing actions. This is useful for proving that RL can improve a verifiable state/action objective before moving to the broader retail split.
 
 Do not promote an SFT checkpoint to the RL parent just because the loss decreases. First compare it to the base model with Weave evals and a horizontal W&B table. For this lab, a usable SFT parent should improve or at least preserve `outcome_success` and `task_success`, while also improving tool-call diagnostics such as `tool_name_f1`, `tool_argument_match`, or state-changing action correctness.
 
 For a production-quality or advanced course variant, consider swapping in or comparing against:
 
+- `amityco/tau-bench-retail-train-next-action-all-step-score-v0.2`
 - `inclusionAI/AReaL-tau2-data`
 - `Jarrodbarnes/tau2-sft-v4-dataset`
 - `HuggingFaceH4/tau2-bench-data`
+
+The helper `course/03_sft_warmup/make_teacher_next_action_sft_jsonl.py` converts the scored amityco rows into ART-compatible next-action JSONL. The default filter keeps rows with `total_score >= 1.0` and `avg_score >= 1.0`, drops answer turns with unknown tools, and attaches the canonical retail tool schema from the local bridge data. The instructor runbook can enable this with `--include-teacher-sft`, producing `sft_train_next_action_teacher_mix.jsonl` plus a JSON summary that is included in the W&B data artifact.
 
 The helper `course/03_sft_warmup/make_areal_retail_sft_jsonl.py` converts the retail, correct rows from `inclusionAI/AReaL-tau2-data` into ART-compatible JSONL for advanced experiments. It strips `thinking`, removes `None` tool arguments, assigns missing tool-call IDs, and attaches the canonical retail tool schemas from a local TAU retail data directory.
 

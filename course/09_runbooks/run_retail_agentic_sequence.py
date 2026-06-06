@@ -86,6 +86,8 @@ def weave_args(args: argparse.Namespace) -> list[str]:
 
 def build_or_refresh_data(args: argparse.Namespace, env: dict[str, str]) -> None:
     if not args.build_bridge and (args.data_dir / "train.jsonl").exists():
+        if args.include_teacher_sft:
+            build_teacher_sft(args, env)
         return
     if not (args.source_dir / "train.jsonl").exists():
         run_command(
@@ -132,6 +134,57 @@ def build_or_refresh_data(args: argparse.Namespace, env: dict[str, str]) -> None
             str(args.bridge_max_per_task),
             "--holdout-modulo",
             str(args.bridge_holdout_mod),
+        ],
+        env=env,
+        dry_run=args.dry_run,
+    )
+    if args.include_teacher_sft:
+        build_teacher_sft(args, env)
+
+
+def build_teacher_sft(args: argparse.Namespace, env: dict[str, str]) -> None:
+    teacher_file = args.data_dir / "sft_teacher_retail_next_action.jsonl"
+    mixed_file = args.data_dir / "sft_train_next_action_teacher_mix.jsonl"
+    run_command(
+        "convert public teacher next-action SFT data",
+        [
+            sys.executable,
+            "-B",
+            "course/03_sft_warmup/make_teacher_next_action_sft_jsonl.py",
+            "--dataset-id",
+            args.teacher_sft_dataset,
+            "--split",
+            args.teacher_sft_split,
+            "--tools-data-dir",
+            path_arg(args.data_dir),
+            "--output",
+            path_arg(teacher_file),
+            "--limit",
+            str(args.teacher_sft_limit),
+            "--min-total-score",
+            str(args.teacher_sft_min_total_score),
+            "--min-avg-score",
+            str(args.teacher_sft_min_avg_score),
+        ],
+        env=env,
+        dry_run=args.dry_run,
+    )
+    run_command(
+        "mix bridge and teacher SFT data",
+        [
+            sys.executable,
+            "-B",
+            "course/03_sft_warmup/mix_sft_jsonl.py",
+            "--inputs",
+            path_arg(args.data_dir / "sft_train_next_action.jsonl"),
+            path_arg(teacher_file),
+            "--limits",
+            str(args.bridge_sft_limit),
+            str(args.teacher_sft_limit),
+            "--output",
+            path_arg(mixed_file),
+            "--summary",
+            path_arg(args.data_dir / "sft_train_next_action_teacher_mix.summary.json"),
         ],
         env=env,
         dry_run=args.dry_run,
@@ -184,7 +237,12 @@ def evaluate_command(
 def train_sft(args: argparse.Namespace, env: dict[str, str], report_dir: Path) -> str:
     anchor_model = retail_model_name(args.run_slug, "sft-anchor")
     sft_env = {**env, "ART_MODEL_NAME": anchor_model}
-    sft_file = args.sft_file or args.data_dir / "sft_train_next_action.jsonl"
+    default_sft_file = (
+        args.data_dir / "sft_train_next_action_teacher_mix.jsonl"
+        if args.include_teacher_sft
+        else args.data_dir / "sft_train_next_action.jsonl"
+    )
+    sft_file = args.sft_file or default_sft_file
     command = [
         sys.executable,
         "-B",
@@ -411,6 +469,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bridge-max-turns", type=int, default=28)
     parser.add_argument("--bridge-max-per-task", type=int, default=2)
     parser.add_argument("--bridge-holdout-mod", type=int, default=5)
+    parser.add_argument("--bridge-sft-limit", type=int, default=-1)
+    parser.add_argument("--include-teacher-sft", action="store_true")
+    parser.add_argument(
+        "--teacher-sft-dataset",
+        default="amityco/tau-bench-retail-train-next-action-all-step-score-v0.2",
+    )
+    parser.add_argument("--teacher-sft-split", default="train")
+    parser.add_argument("--teacher-sft-limit", type=int, default=512)
+    parser.add_argument("--teacher-sft-min-total-score", type=float, default=1.0)
+    parser.add_argument("--teacher-sft-min-avg-score", type=float, default=1.0)
     parser.add_argument("--reward-profile", default="tau_irc")
     parser.add_argument("--max-completion-tokens", type=int, default=768)
     parser.add_argument("--art-seq-length", type=int, default=16384)

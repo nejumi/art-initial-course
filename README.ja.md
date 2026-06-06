@@ -10,6 +10,7 @@
 オープンなretail tool-callingデータセットを使い、カスタマーサポートAgentをSFTとRLで改善します。
 
 - SFTとワークフロー確認: `lefft/tau-dev-task-retail-v1`
+- 追加SFT warm start: `amityco/tau-bench-retail-train-next-action-all-step-score-v0.2` と `inclusionAI/AReaL-tau2-data`
 - RL rollout / reward / eval設計: tau-bench / tau2-bench retailの考え方を簡略化して利用
 
 ## 推奨モデル
@@ -24,6 +25,7 @@ baseline eval、next-action SFT、SFTからのGRPO/GSPO独立分岐、eval、W&B
 
 runbookはtau-style RL向けに `--continue-on-invalid` をデフォルトで有効化しています。最終レポート用には `--eval-rollouts-per-scenario 4 --eval-temperature 0.2` を加えると、pass@kとreward varianceも比較できます。
 比較結果は監査用の全列版 `checkpoint_eval_comparison.md/.csv` と、README/スライド向けの簡潔版 `checkpoint_eval_summary.md/.csv` の両方に出力されます。
+SFT warm startを強める講師向けフル検証では、英語版READMEの `--include-teacher-sft` 例を使うと公開teacher next-actionデータをbridgeデータに混ぜられます。
 
 SUNK/Slurm環境では次のラッパーを使えます。
 

@@ -93,7 +93,7 @@ API smoke test:
 
 - Baseline LFM2.5-8B-A1Bはretail tool callingをある程度こなせるため、初期モデルが完全に壊れているtoy exampleにならない。
 - 古いstrict replayに近い報酬では、小さなscalar reward改善が見えてもagentic RLの教材としては不十分だった。最終版ではこの結果を「診断用の失敗例」として扱い、期待結果には使わない。
-- 現在の本線は、短いbridge curriculumで `next-action SFT -> GRPO branch / GSPO branch` を独立比較し、`tau_irc` 報酬、state-changing action correctness、communication success、proxy outcome success、official tau2 importを横持ち表で検証する流れ。
+- 現在の本線は、短いbridge curriculumで `next-action SFT -> GRPO branch / GSPO branch` を独立比較し、`tau_irc` 報酬、state-changing action correctness、communication success、proxy outcome success、official tau2 importを横持ち表で検証する流れ。SFT parentが弱い場合は、`amityco/tau-bench-retail-train-next-action-all-step-score-v0.2` の高スコアteacher next-action行を `make_teacher_next_action_sft_jsonl.py` で変換し、bridge next-actionと混ぜたwarm startを使う。
 - SFT checkpointはlossだけでは採用しない。baseline/SFT/RLを同じholdoutでWeave evalし、SFTが少なくともtool-call形式とstate-changing action指標を改善していることを確認してからRL parentにする。
 - RLは「エラーなく回る」では合格にしない。group内reward variance、winner-minus-loser差分、zero-variance group filter、state-action attempt/reached rate、bad/missing state-action rateをW&Bに出し、GRPO/GSPOが実際に学習信号を受けていることを確認する。
 - 最終的な期待結果表は、フル再実行後にW&B Artifacts/Weave tracesと紐づく横持ちテーブルへ差し替える。汚れた探索projectのログは研究記録として残し、共有用sample projectは別projectに再実行して作る。
@@ -101,7 +101,7 @@ API smoke test:
 学習題材:
 
 - メイン題材は「Retail Customer Support Agent」
-- オープンデータ: `lefft/tau-dev-task-retail-v1` をSFT/形式理解に使い、tau-bench/tau2-bench retailの考え方を評価/RL rollout設計に使う。Advancedでは `inclusionAI/AReaL-tau2-data` をnext-action SFT/RLデータ設計の比較対象にする。
+- オープンデータ: `lefft/tau-dev-task-retail-v1` をSFT/形式理解に使い、tau-bench/tau2-bench retailの考え方を評価/RL rollout設計に使う。SFT warm start強化では `amityco/tau-bench-retail-train-next-action-all-step-score-v0.2` を使い、Advancedでは `inclusionAI/AReaL-tau2-data` をnext-action SFT/RLデータ設計の比較対象にする。
 - 入力: 顧客からの注文キャンセル、返品、交換、住所変更、注文状況確認、商品情報確認などの問い合わせ。
 - 出力: 顧客への自然文応答と、必要なOpenAI tool-calling形式の関数呼び出し。
 - ツール例: `get_user_details`, `get_order_details`, `modify_pending_order_address`, `cancel_pending_order`, `return_delivered_order`, `exchange_delivered_order`, `calculate`。

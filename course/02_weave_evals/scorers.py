@@ -58,6 +58,16 @@ def agentic_signal_scorer(output: dict[str, Any], **_: Any) -> dict[str, float]:
         "state_action_attempt_rate": _metric(output, "state_action_attempt_rate"),
         "state_action_reached_rate": _metric(output, "state_action_reached_rate"),
         "valid_state_action_rate": _metric(output, "valid_state_action_rate"),
+        "accepted_state_action_jump": _metric(output, "accepted_state_action_jump"),
+        "accepted_state_action_jump_count": _metric(output, "accepted_state_action_jump_count"),
+        "first_accepted_state_action_jump_turn": _metric(output, "first_accepted_state_action_jump_turn"),
+        "skipped_reference_turns_before_state_action": _metric(
+            output, "skipped_reference_turns_before_state_action"
+        ),
+        "last_accepted_reference_state_output_index": _metric(
+            output, "last_accepted_reference_state_output_index"
+        ),
+        "last_accepted_reference_state_turn_index": _metric(output, "last_accepted_reference_state_turn_index"),
         "reward_component/outcome": _metric(output, "reward_component/outcome"),
         "reward_component/state_action": _metric(output, "reward_component/state_action"),
         "reward_component/state_action_args": _metric(output, "reward_component/state_action_args"),

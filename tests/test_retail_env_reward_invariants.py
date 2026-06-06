@@ -667,6 +667,10 @@ class RetailRewardInvariantTests(unittest.TestCase):
         self.assertEqual(step.invalid_tool_calls, 0)
         self.assertEqual(step.invalid_state_mutations, 0)
         self.assertEqual(step.bad_state_actions, 0)
+        self.assertTrue(step.accepted_state_action_jump)
+        self.assertIsNotNone(step.accepted_reference_state_output_index)
+        self.assertIsNotNone(step.accepted_reference_state_turn_index)
+        self.assertGreaterEqual(step.skipped_reference_turns_before_state_action, 1)
         self.assertIn("canceled", step.tool_messages[0]["content"])
         self.assertFalse(step.done)
 
@@ -683,6 +687,8 @@ class RetailRewardInvariantTests(unittest.TestCase):
         self.assertEqual(step.invalid_tool_calls, 1)
         self.assertEqual(step.invalid_state_mutations, 1)
         self.assertEqual(step.bad_state_actions, 1)
+        self.assertFalse(step.accepted_state_action_jump)
+        self.assertIsNone(step.accepted_reference_state_output_index)
         self.assertIn("unexpected_state_action", step.tool_messages[0]["content"])
 
     def test_unknown_tool_is_invalid_even_in_tau_mode(self) -> None:

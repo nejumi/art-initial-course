@@ -301,6 +301,8 @@ class ReplayRetailEnv:
         bad_state_actions = 0
         matched_expected_tools = bool(expected) and len(calls) == len(expected_tool_names)
         accepted_state_jump_turn_index: int | None = None
+        accepted_state_jump_output_index: int | None = None
+        skipped_reference_turns_before_state_action = 0
 
         for index, call in enumerate(calls):
             name = tool_call_name(call)
@@ -348,6 +350,8 @@ class ReplayRetailEnv:
                 matched_turn_index, _matched_call, content = self.reference_tool_outputs[reference_match[0]]
                 self.accepted_reference_state_output_indices.add(reference_match[0])
                 accepted_state_jump_turn_index = matched_turn_index
+                accepted_state_jump_output_index = reference_match[0]
+                skipped_reference_turns_before_state_action = max(0, matched_turn_index - self.turn_index)
                 matched_expected_tools = False
             else:
                 if self.strict_reference_actions or state_changing:
@@ -431,4 +435,8 @@ class ReplayRetailEnv:
             terminated_on_invalid=terminated_on_invalid,
             expected_tool_names=expected_tool_names,
             actual_tool_names=[tool_call_name(call) for call in calls],
+            accepted_state_action_jump=accepted_state_jump_turn_index is not None and invalid == 0,
+            accepted_reference_state_output_index=accepted_state_jump_output_index,
+            accepted_reference_state_turn_index=accepted_state_jump_turn_index,
+            skipped_reference_turns_before_state_action=skipped_reference_turns_before_state_action,
         )

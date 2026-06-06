@@ -40,6 +40,10 @@ class EnvStep:
     terminated_on_invalid: bool = False
     expected_tool_names: list[str] = field(default_factory=list)
     actual_tool_names: list[str] = field(default_factory=list)
+    accepted_state_action_jump: bool = False
+    accepted_reference_state_output_index: int | None = None
+    accepted_reference_state_turn_index: int | None = None
+    skipped_reference_turns_before_state_action: int = 0
 
 
 @dataclass

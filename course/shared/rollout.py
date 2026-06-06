@@ -60,6 +60,11 @@ async def rollout_retail(
     first_state_action_turn = 0
     first_expected_state_action_turn = 0
     read_only_deviations_before_state_action = 0
+    accepted_state_action_jump_count = 0
+    first_accepted_state_action_jump_turn = 0
+    skipped_reference_turns_before_state_action = 0
+    last_accepted_reference_state_output_index = -1
+    last_accepted_reference_state_turn_index = -1
 
     for _ in range(turns):
         turns_used += 1
@@ -84,6 +89,15 @@ async def rollout_retail(
             first_state_action_turn = turns_used
         if first_state_action_turn == 0:
             read_only_deviations_before_state_action += step.read_only_reference_mismatches
+        if step.accepted_state_action_jump:
+            accepted_state_action_jump_count += 1
+            if first_accepted_state_action_jump_turn == 0:
+                first_accepted_state_action_jump_turn = turns_used
+            skipped_reference_turns_before_state_action += step.skipped_reference_turns_before_state_action
+            if step.accepted_reference_state_output_index is not None:
+                last_accepted_reference_state_output_index = step.accepted_reference_state_output_index
+            if step.accepted_reference_state_turn_index is not None:
+                last_accepted_reference_state_turn_index = step.accepted_reference_state_turn_index
         if first_failure_turn == 0:
             if step.unknown_tool_calls:
                 first_failure_turn = turns_used
@@ -127,6 +141,16 @@ async def rollout_retail(
     trajectory.metrics["read_only_reference_mismatches_before_state_action"] = float(
         read_only_deviations_before_state_action
     )
+    trajectory.metrics["accepted_state_action_jump"] = 1.0 if accepted_state_action_jump_count else 0.0
+    trajectory.metrics["accepted_state_action_jump_count"] = float(accepted_state_action_jump_count)
+    trajectory.metrics["first_accepted_state_action_jump_turn"] = float(first_accepted_state_action_jump_turn)
+    trajectory.metrics["skipped_reference_turns_before_state_action"] = float(
+        skipped_reference_turns_before_state_action
+    )
+    trajectory.metrics["last_accepted_reference_state_output_index"] = float(
+        last_accepted_reference_state_output_index
+    )
+    trajectory.metrics["last_accepted_reference_state_turn_index"] = float(last_accepted_reference_state_turn_index)
     trajectory.metadata["first_failure_type"] = first_failure_type or "none"
     trajectory.log(result.explanation)
     return trajectory.finish()

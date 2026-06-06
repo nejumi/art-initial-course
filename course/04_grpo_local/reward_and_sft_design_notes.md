@@ -169,7 +169,7 @@ The acceptance gate reads `train_metrics_<algo>_<suffix>.jsonl` when it is prese
 
 The runbook also writes `train_metrics_<algo>_<suffix>.jsonl` for each RL branch. Use `course/02_weave_evals/select_checkpoint_candidate.py` to shortlist candidate steps for held-out eval when a long run peaks before the final checkpoint. Do not copy the best train-step row into the expected-results table; first fork or log that checkpoint, run fresh validation rollouts, and inspect Weave traces for the selected tasks.
 
-Eval rows and Weave scorers also record `first_failure_turn`, `first_state_action_turn`, `first_expected_state_action_turn`, and `read_only_reference_mismatches_before_state_action`. These help separate "the model never reached the consequential action" from "the model reached the action but mutated the wrong state" and from "the model spent too many turns on recoverable read-only detours."
+Eval rows and Weave scorers also record `first_failure_turn`, `first_state_action_turn`, `first_expected_state_action_turn`, `read_only_reference_mismatches_before_state_action`, `accepted_state_action_jump`, `accepted_state_action_jump_count`, `first_accepted_state_action_jump_turn`, and `skipped_reference_turns_before_state_action`. These help separate "the model never reached the consequential action" from "the model reached the action but mutated the wrong state" and from "the model spent too many turns on recoverable read-only detours."
 
 Reward calibration worksheet:
 

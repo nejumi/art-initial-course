@@ -4,7 +4,7 @@ from typing import Any
 
 from .config import config_from_env
 from .data import augment_system_message
-from .retail_env import ReplayRetailEnv
+from .retail_env import ReplayRetailEnv, is_state_changing_tool
 from .rewards import normalize_reward_profile, score_trajectory
 from .schemas import RetailScenario
 from .tracing import weave_op
@@ -54,6 +54,11 @@ async def rollout_retail(
     completion_budget = max_completion_tokens or cfg.rollout_max_completion_tokens
     done = False
     turns_used = 0
+    first_failure_turn = 0
+    first_failure_type = ""
+    first_state_action_turn = 0
+    first_expected_state_action_turn = 0
+    read_only_deviations_before_state_action = 0
 
     for _ in range(turns):
         turns_used += 1
@@ -72,6 +77,25 @@ async def rollout_retail(
         trajectory.messages_and_choices.append(choice)
 
         step = env.step(choice.message)
+        if first_expected_state_action_turn == 0 and any(is_state_changing_tool(name) for name in step.expected_tool_names):
+            first_expected_state_action_turn = turns_used
+        if first_state_action_turn == 0 and any(is_state_changing_tool(name) for name in step.actual_tool_names):
+            first_state_action_turn = turns_used
+        if first_state_action_turn == 0:
+            read_only_deviations_before_state_action += step.read_only_reference_mismatches
+        if first_failure_turn == 0:
+            if step.unknown_tool_calls:
+                first_failure_turn = turns_used
+                first_failure_type = "unknown_tool"
+            elif step.bad_state_actions or step.invalid_state_mutations:
+                first_failure_turn = turns_used
+                first_failure_type = "bad_state_action"
+            elif step.missing_state_actions:
+                first_failure_turn = turns_used
+                first_failure_type = "missing_state_action"
+            elif step.bad_read_only_calls or step.read_only_reference_mismatches:
+                first_failure_turn = turns_used
+                first_failure_type = "read_only_reference_mismatch"
         trajectory.messages_and_choices.extend(step.tool_messages)
         trajectory.messages_and_choices.extend(step.user_messages)
         if step.done:
@@ -95,5 +119,13 @@ async def rollout_retail(
     trajectory.reward = result.reward
     trajectory.metrics.update(result.metrics)
     trajectory.metrics["terminated_on_invalid"] = 1.0 if env.terminated_on_invalid else 0.0
+    trajectory.metrics["first_failure_observed"] = 1.0 if first_failure_turn else 0.0
+    trajectory.metrics["first_failure_turn"] = float(first_failure_turn)
+    trajectory.metrics["first_state_action_turn"] = float(first_state_action_turn)
+    trajectory.metrics["first_expected_state_action_turn"] = float(first_expected_state_action_turn)
+    trajectory.metrics["read_only_reference_mismatches_before_state_action"] = float(
+        read_only_deviations_before_state_action
+    )
+    trajectory.metadata["first_failure_type"] = first_failure_type or "none"
     trajectory.log(result.explanation)
     return trajectory.finish()

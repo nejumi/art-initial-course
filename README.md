@@ -215,6 +215,26 @@ Training scripts use W&B Artifacts and Weave Evaluations for lineage:
 - Eval runs can call `use_artifact` on both the dataset and the evaluated checkpoint, while Weave stores rollout traces.
 - After checkpoint comparison, the runbook publishes each cached JSONL result as a Weave Evaluation using the same scorer set, so instructors can inspect both trace-level behavior and stage-level eval summaries without rerunning rollouts.
 
+When a long RL run peaks before the final step, log the stable intermediate checkpoint without moving the mutable `latest` alias:
+
+```bash
+python course/07_models_registry_weave/log_checkpoint_artifact.py \
+  --model-name retail-support-agent-lfm25-8b-a1b-bridge-state1-grpo-bridge-s32-lr2e6 \
+  --stage grpo \
+  --checkpoint-step 23 \
+  --alias validation-candidate
+```
+
+For a fresh rollout eval of that step on another GPU, first materialize it under a unique model name without starting LocalBackend/vLLM:
+
+```bash
+python course/08_enterprise_ops/fork_checkpoint.py \
+  --from-model retail-support-agent-lfm25-8b-a1b-bridge-state1-grpo-bridge-s32-lr2e6 \
+  --to-model retail-support-agent-lfm25-8b-a1b-bridge-state1-grpo-step23-eval \
+  --not-after-step 23 \
+  --file-only
+```
+
 Reward and SFT data design notes: [course/04_grpo_local/reward_and_sft_design_notes.md](course/04_grpo_local/reward_and_sft_design_notes.md).
 
 Official tau2 evaluation bridge: [course/02_weave_evals/official_tau2_eval_bridge.md](course/02_weave_evals/official_tau2_eval_bridge.md). Use this when you need benchmark-grade `DB * COMMUNICATE` scores in addition to the lightweight training proxy.

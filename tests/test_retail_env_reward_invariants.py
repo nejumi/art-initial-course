@@ -25,6 +25,7 @@ areal_sft = importlib.import_module("course.03_sft_warmup.make_areal_retail_sft_
 success_trace_sft = importlib.import_module("course.03_sft_warmup.make_success_trace_retail_sft_jsonl")
 cached_weave_eval = importlib.import_module("course.02_weave_evals.evaluate_cached_checkpoint")
 stage_acceptance = importlib.import_module("course.02_weave_evals.check_stage_acceptance")
+fork_checkpoint = importlib.import_module("course.08_enterprise_ops.fork_checkpoint")
 
 
 def assistant_tool_call(name: str, arguments: dict[str, object]) -> dict[str, object]:
@@ -359,6 +360,32 @@ class RetailRewardInvariantTests(unittest.TestCase):
         self.assertEqual(latest_aliases, ["grpo", "step-0023", "latest"])
         self.assertEqual(historical_aliases, ["grpo-step-0023", "step-0023", "candidate"])
         self.assertNotIn("latest", historical_aliases)
+
+    def test_file_only_checkpoint_fork_copies_selected_step(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = RetailCourseConfig(project="proj", art_path=tmp, model_name="unused")
+            source_root = Path(tmp) / "proj" / "models" / "source-model" / "checkpoints"
+            (source_root / "0001").mkdir(parents=True)
+            (source_root / "0001" / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (source_root / "0003").mkdir()
+            (source_root / "0003" / "adapter_config.json").write_text('{"newer": true}', encoding="utf-8")
+
+            dest = fork_checkpoint.file_only_fork_checkpoint(
+                cfg,
+                from_model="source-model",
+                to_model="eval-model",
+                not_after_step=2,
+            )
+
+            self.assertEqual(dest.name, "0001")
+            self.assertEqual((dest / "adapter_config.json").read_text(encoding="utf-8"), "{}")
+            with self.assertRaises(FileExistsError):
+                fork_checkpoint.file_only_fork_checkpoint(
+                    cfg,
+                    from_model="source-model",
+                    to_model="eval-model",
+                    not_after_step=2,
+                )
 
     def test_stage_gate_rejects_rl_without_agentic_lift(self) -> None:
         criteria = stage_acceptance.Criteria()

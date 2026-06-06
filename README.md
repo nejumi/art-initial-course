@@ -87,6 +87,25 @@ python course/09_runbooks/run_retail_agentic_sequence.py \
   --rl-algos grpo,gspo
 ```
 
+For a research-aligned instructor validation pass, mix both public teacher rows and AReaL tau2 SFT rows:
+
+```bash
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-slug lfm25-8b-a1b-bridge-state1-teacher-areal \
+  --base-model LiquidAI/LFM2.5-8B-A1B \
+  --data-dir data/retail_bridge_state1 \
+  --source-dir data/retail \
+  --data-artifact-name retail-course-data-bridge-state1-teacher-areal \
+  --build-bridge \
+  --include-teacher-sft \
+  --teacher-sft-limit 512 \
+  --include-areal-sft \
+  --areal-sft-limit 512 \
+  --sft-max-steps 192 \
+  --rl-steps 48 \
+  --rl-algos grpo,gspo
+```
+
 The runbook defaults to `--continue-on-invalid` for tau-style RL. Unexpected state-changing actions are still penalized, but rollouts continue long enough for final state/action and communication rewards to be observed. Use `--no-continue-on-invalid` only when demonstrating strict replay failure modes.
 For the final course report, add stochastic validation with `--eval-rollouts-per-scenario 4 --eval-temperature 0.2` so `outcome_pass_at_k`, `task_pass_at_k`, and reward variance columns are meaningful. Keep the default deterministic eval for quick instructor checks.
 
@@ -105,9 +124,17 @@ python course/03_sft_warmup/make_teacher_next_action_sft_jsonl.py \
   --limit 512
 
 python course/03_sft_warmup/make_areal_retail_sft_jsonl.py \
-  --tools-data-dir data/retail \
-  --output data/retail/sft_areal_retail_next_action.jsonl \
-  --limit 200
+  --tools-data-dir data/retail_bridge_state1 \
+  --output data/retail_bridge_state1/sft_areal_retail_next_action.jsonl \
+  --limit 512
+
+python course/03_sft_warmup/mix_sft_jsonl.py \
+  --inputs \
+    data/retail_bridge_state1/sft_train_next_action.jsonl \
+    data/retail_bridge_state1/sft_teacher_retail_next_action.jsonl \
+    data/retail_bridge_state1/sft_areal_retail_next_action.jsonl \
+  --limits -1 512 512 \
+  --output data/retail_bridge_state1/sft_train_next_action_teacher_areal_mix.jsonl
 ```
 
 The default course path uses compact TAU retail trajectories. The bridge curriculum keeps short successful trajectories with exactly one state-changing action, which is useful for proving that agentic RL can improve a verifiable outcome before moving to the broader retail curriculum. The teacher and AReaL converters are provided for stronger warm starts and advanced experiments that want to align SFT data construction with recent tau2-style multi-turn tool-agent work.

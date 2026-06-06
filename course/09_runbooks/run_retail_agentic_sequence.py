@@ -86,8 +86,8 @@ def weave_args(args: argparse.Namespace) -> list[str]:
 
 def build_or_refresh_data(args: argparse.Namespace, env: dict[str, str]) -> None:
     if not args.build_bridge and (args.data_dir / "train.jsonl").exists():
-        if args.include_teacher_sft:
-            build_teacher_sft(args, env)
+        if args.include_teacher_sft or args.include_areal_sft:
+            build_augmented_sft(args, env)
         return
     if not (args.source_dir / "train.jsonl").exists():
         run_command(
@@ -138,13 +138,59 @@ def build_or_refresh_data(args: argparse.Namespace, env: dict[str, str]) -> None
         env=env,
         dry_run=args.dry_run,
     )
+    if args.include_teacher_sft or args.include_areal_sft:
+        build_augmented_sft(args, env)
+
+
+def augmented_sft_file(args: argparse.Namespace) -> Path:
+    if args.include_teacher_sft and args.include_areal_sft:
+        return args.data_dir / "sft_train_next_action_teacher_areal_mix.jsonl"
     if args.include_teacher_sft:
-        build_teacher_sft(args, env)
+        return args.data_dir / "sft_train_next_action_teacher_mix.jsonl"
+    if args.include_areal_sft:
+        return args.data_dir / "sft_train_next_action_areal_mix.jsonl"
+    return args.data_dir / "sft_train_next_action.jsonl"
 
 
-def build_teacher_sft(args: argparse.Namespace, env: dict[str, str]) -> None:
+def build_augmented_sft(args: argparse.Namespace, env: dict[str, str]) -> None:
+    inputs = [args.data_dir / "sft_train_next_action.jsonl"]
+    limits = [args.bridge_sft_limit]
+    source_labels = ["bridge"]
+
+    if args.include_teacher_sft:
+        teacher_file = build_teacher_sft(args, env)
+        inputs.append(teacher_file)
+        limits.append(args.teacher_sft_limit)
+        source_labels.append("teacher")
+    if args.include_areal_sft:
+        areal_file = build_areal_sft(args, env)
+        inputs.append(areal_file)
+        limits.append(args.areal_sft_limit)
+        source_labels.append("areal")
+
+    mixed_file = augmented_sft_file(args)
+    run_command(
+        f"mix {'/'.join(source_labels)} SFT data",
+        [
+            sys.executable,
+            "-B",
+            "course/03_sft_warmup/mix_sft_jsonl.py",
+            "--inputs",
+            *[path_arg(path) for path in inputs],
+            "--limits",
+            *[str(limit) for limit in limits],
+            "--output",
+            path_arg(mixed_file),
+            "--summary",
+            path_arg(mixed_file.with_suffix(".summary.json")),
+        ],
+        env=env,
+        dry_run=args.dry_run,
+    )
+
+
+def build_teacher_sft(args: argparse.Namespace, env: dict[str, str]) -> Path:
     teacher_file = args.data_dir / "sft_teacher_retail_next_action.jsonl"
-    mixed_file = args.data_dir / "sft_train_next_action_teacher_mix.jsonl"
     run_command(
         "convert public teacher next-action SFT data",
         [
@@ -169,26 +215,38 @@ def build_teacher_sft(args: argparse.Namespace, env: dict[str, str]) -> None:
         env=env,
         dry_run=args.dry_run,
     )
+    return teacher_file
+
+
+def build_areal_sft(args: argparse.Namespace, env: dict[str, str]) -> Path:
+    areal_file = args.data_dir / "sft_areal_retail_next_action.jsonl"
+    command = [
+        sys.executable,
+        "-B",
+        "course/03_sft_warmup/make_areal_retail_sft_jsonl.py",
+        "--dataset-id",
+        args.areal_sft_dataset,
+        "--split",
+        args.areal_sft_split,
+        "--tools-data-dir",
+        path_arg(args.data_dir),
+        "--output",
+        path_arg(areal_file),
+        "--limit",
+        str(args.areal_sft_limit),
+        "--min-reward",
+        str(args.areal_sft_min_reward),
+    ]
+    command += maybe_append("--max-source-rows", args.areal_sft_max_source_rows)
+    if args.areal_sft_allow_uncertain_correct:
+        command.append("--allow-uncertain-correct")
     run_command(
-        "mix bridge and teacher SFT data",
-        [
-            sys.executable,
-            "-B",
-            "course/03_sft_warmup/mix_sft_jsonl.py",
-            "--inputs",
-            path_arg(args.data_dir / "sft_train_next_action.jsonl"),
-            path_arg(teacher_file),
-            "--limits",
-            str(args.bridge_sft_limit),
-            str(args.teacher_sft_limit),
-            "--output",
-            path_arg(mixed_file),
-            "--summary",
-            path_arg(args.data_dir / "sft_train_next_action_teacher_mix.summary.json"),
-        ],
+        "convert AReaL tau2 retail next-action SFT data",
+        command,
         env=env,
         dry_run=args.dry_run,
     )
+    return areal_file
 
 
 def evaluate_command(
@@ -237,11 +295,7 @@ def evaluate_command(
 def train_sft(args: argparse.Namespace, env: dict[str, str], report_dir: Path) -> str:
     anchor_model = retail_model_name(args.run_slug, "sft-anchor")
     sft_env = {**env, "ART_MODEL_NAME": anchor_model}
-    default_sft_file = (
-        args.data_dir / "sft_train_next_action_teacher_mix.jsonl"
-        if args.include_teacher_sft
-        else args.data_dir / "sft_train_next_action.jsonl"
-    )
+    default_sft_file = augmented_sft_file(args)
     sft_file = args.sft_file or default_sft_file
     command = [
         sys.executable,
@@ -479,6 +533,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--teacher-sft-limit", type=int, default=512)
     parser.add_argument("--teacher-sft-min-total-score", type=float, default=1.0)
     parser.add_argument("--teacher-sft-min-avg-score", type=float, default=1.0)
+    parser.add_argument("--include-areal-sft", action="store_true")
+    parser.add_argument("--areal-sft-dataset", default="inclusionAI/AReaL-tau2-data")
+    parser.add_argument("--areal-sft-split", default="sft")
+    parser.add_argument("--areal-sft-limit", type=int, default=512)
+    parser.add_argument("--areal-sft-min-reward", type=float, default=1.0)
+    parser.add_argument("--areal-sft-max-source-rows", type=int, default=None)
+    parser.add_argument(
+        "--areal-sft-allow-uncertain-correct",
+        action="store_true",
+        help="Allow AReaL rows where metadata.correct is absent; the default keeps only correct rows.",
+    )
     parser.add_argument("--reward-profile", default="tau_irc")
     parser.add_argument("--max-completion-tokens", type=int, default=768)
     parser.add_argument("--art-seq-length", type=int, default=16384)

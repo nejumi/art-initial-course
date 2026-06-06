@@ -18,6 +18,7 @@ record_to_next_action_examples = importlib.import_module(
     "course.03_sft_warmup.make_next_action_sft_jsonl"
 ).record_to_next_action_examples
 teacher_sft = importlib.import_module("course.03_sft_warmup.make_teacher_next_action_sft_jsonl")
+areal_sft = importlib.import_module("course.03_sft_warmup.make_areal_retail_sft_jsonl")
 
 
 def assistant_tool_call(name: str, arguments: dict[str, object]) -> dict[str, object]:
@@ -145,6 +146,77 @@ class RetailRewardInvariantTests(unittest.TestCase):
             drop_unknown_tools=True,
             min_total_score=1.0,
             min_avg_score=1.0,
+        )
+
+        self.assertIsNone(example)
+
+    def test_areal_conversion_strips_thinking_and_normalizes_answer_tool_call(self) -> None:
+        row = {
+            "messages": [
+                {"role": "system", "content": "# Retail agent policy\nHelp the customer."},
+                {"role": "user", "content": "Please cancel order O-1001."},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "I should look up the order.",
+                    "tool_calls": [{"name": "get_order_details", "arguments": {"order_id": "O-1001"}}],
+                },
+                {"role": "tool", "content": "{\"status\":\"pending\"}"},
+            ],
+            "answer": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "Now cancel it.",
+                "tool_calls": [{"name": "cancel_pending_order", "arguments": {"order_id": "O-1001"}}],
+            },
+            "metadata": {
+                "source_dialog_id": "retail_dialog_7",
+                "scenario_id": "scenario_7",
+                "turn_index": 2,
+                "correct": 1,
+                "reward": 1.0,
+            },
+        }
+
+        example = areal_sft.convert_areal_row(
+            row,
+            row_index=0,
+            tools=sample_records()[0]["tools"],
+            drop_unknown_tools=True,
+            dataset_id="areal/example",
+            require_correct=True,
+            min_reward=1.0,
+        )
+
+        self.assertIsNotNone(example)
+        assert example is not None
+        self.assertEqual(example["metadata"]["sft_format"], "areal-retail-next-action")
+        self.assertNotIn("thinking", json.dumps(example["messages"]))
+        final_call = example["messages"][-1]["tool_calls"][0]
+        self.assertEqual(final_call["function"]["name"], "cancel_pending_order")
+        self.assertEqual(json.loads(final_call["function"]["arguments"]), {"order_id": "O-1001"})
+
+    def test_areal_conversion_drops_unknown_answer_tool(self) -> None:
+        row = {
+            "messages": [
+                {"role": "system", "content": "# Retail agent policy\nHelp the customer."},
+                {"role": "user", "content": "Delete my account."},
+            ],
+            "answer": {
+                "role": "assistant",
+                "tool_calls": [{"name": "delete_customer_account", "arguments": {}}],
+            },
+            "metadata": {"source_dialog_id": "retail_dialog_8", "correct": 1, "reward": 1.0},
+        }
+
+        example = areal_sft.convert_areal_row(
+            row,
+            row_index=0,
+            tools=sample_records()[0]["tools"],
+            drop_unknown_tools=True,
+            dataset_id="areal/example",
+            require_correct=True,
+            min_reward=1.0,
         )
 
         self.assertIsNone(example)

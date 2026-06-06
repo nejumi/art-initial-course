@@ -13,6 +13,7 @@ from course.shared.art_compat import make_local_backend, make_trainable_model
 from course.shared.config import config_from_env
 from course.shared.data import load_cached_split, scenarios_from_records, write_sample_dataset
 from course.shared.rollout import rollout_retail
+from course.shared.tracing import init_weave
 
 RULER_RUBRIC = """
 Rank the retail support trajectories by: successful task completion, correct tool use,
@@ -29,11 +30,15 @@ async def main_async() -> None:
     parser.add_argument("--groups-per-step", type=int, default=4)
     parser.add_argument("--rollouts-per-scenario", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=5e-6)
-    parser.add_argument("--judge-model", default="openai/o3")
+    parser.add_argument("--judge-model", default="openai/gpt-5.5")
+    parser.add_argument("--judge-effort", default="medium", choices=["low", "medium", "high", "xhigh"])
     parser.add_argument("--seed", type=int, default=11)
+    parser.add_argument("--weave", action="store_true", help="Trace rollouts to Weave during this run.")
     args = parser.parse_args()
 
     cfg = config_from_env()
+    if args.weave:
+        init_weave(cfg.project)
     data_dir = Path(args.data_dir)
     if not (data_dir / f"{args.split}.jsonl").exists():
         write_sample_dataset(data_dir)
@@ -53,6 +58,7 @@ async def main_async() -> None:
             group,
             judge_model=args.judge_model,
             rubric=RULER_RUBRIC,
+            extra_litellm_params={"reasoning_effort": args.judge_effort},
             swallow_exceptions=True,
         )
         if judged is None:

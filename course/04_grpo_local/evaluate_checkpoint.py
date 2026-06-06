@@ -12,6 +12,7 @@ from course.shared.art_compat import make_local_backend, make_trainable_model
 from course.shared.config import config_from_env
 from course.shared.data import load_cached_split, scenarios_from_records, write_jsonl, write_sample_dataset
 from course.shared.rollout import rollout_retail
+from course.shared.tracing import init_weave
 
 
 async def main_async() -> None:
@@ -21,9 +22,12 @@ async def main_async() -> None:
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--output", default="data/retail/eval_current.jsonl")
     parser.add_argument("--no-logprobs", action="store_true")
+    parser.add_argument("--weave", action="store_true", help="Trace eval rollouts to Weave during this run.")
     args = parser.parse_args()
 
     cfg = config_from_env()
+    if args.weave:
+        init_weave(cfg.project)
     data_dir = Path(args.data_dir)
     if not (data_dir / f"{args.split}.jsonl").exists():
         write_sample_dataset(data_dir)

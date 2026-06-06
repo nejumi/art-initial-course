@@ -63,6 +63,12 @@
 
 推奨形式:
 
+API smoke test:
+
+- 受講者の設定は `.env.example` -> `.env` を基本にし、shell envが `.env` より優先される設計にする。
+- 教材で写経させる公開API名・引数名は、pinした `openpipe-art` バージョンで `course/00_setup/art_api_smoke.py` のimport/signature smoke testを通してから使う。
+- 特に `backend.train` kwargs、RULER kwargs、SFT helper、checkpoint/state/config系APIはdocsだけでなくsource/installed packageの両方で確認する。
+
 - 2日集中ワークショップ + 事前セットアップ + 事後capstone
 - 各章は「10-20分の座学 -> 20-45分のハンズオン -> W&B/Weaveで観察 -> 設計判断ディスカッション」の型で進める。
 - 受講者はGPUに応じて2つの演習トラックを選ぶ。
@@ -73,10 +79,18 @@
 - Enterprise: W&B Dedicated Cloud or Self-Managed with local/customer-managed training
 - Optional: ServerlessBackend on W&B Training, 20-30分の比較デモ
 
+モデル選択:
+
+- `ART_MODEL_PROFILE=tiny`: `LiquidAI/LFM2.5-1.2B-Thinking`。小さなGPUやCPU寄り環境でのsetup/SFT/RL smoke test用。ART LocalBackendで本格RLに使う前に互換性を確認する。
+- `ART_MODEL_PROFILE=standard`: `OpenPipe/Qwen3-14B-Instruct`。メインハンズオンの基準モデル。
+- `ART_MODEL_PROFILE=serverless`: `OpenPipe/Qwen3-14B-Instruct`。W&B Serverless RLの軽い比較デモ用。
+- `ART_MODEL_PROFILE=moe`: `Qwen/Qwen3-30B-A3B-Instruct-2507`。Serverless/Megatron/MoEの発展説明用。
+- `ART_BASE_MODEL` を指定した場合はprofileより優先され、参加者や講師が任意のHF/vLLM互換モデルへ差し替えられる。
+
 学習題材:
 
 - メイン題材は「Retail Customer Support Agent」
-- オープンデータ: `lefft/tau-dev-task-retail-v1` をSFT/形式理解に使い、tau2-bench/tau3-bench retail taskを評価/RL rolloutの環境に使う。
+- オープンデータ: `lefft/tau-dev-task-retail-v1` をSFT/形式理解に使い、tau-bench/tau2-bench retail tasksを評価/RL rolloutの環境に使う。
 - 入力: 顧客からの注文キャンセル、返品、交換、住所変更、注文状況確認、商品情報確認などの問い合わせ。
 - 出力: 顧客への自然文応答と、必要なOpenAI tool-calling形式の関数呼び出し。
 - ツール例: `get_user_details`, `get_order_details`, `modify_pending_order_address`, `cancel_pending_order`, `return_delivered_order`, `exchange_delivered_order`, `calculate`。
@@ -674,8 +688,9 @@ groups = await art.gather_trajectory_groups(
     ),
     after_each=lambda g: ruler_score_group(
         g,
-        judge_model="openai/o3",
+        judge_model="openai/gpt-5.5",
         rubric=RUBRIC,
+        extra_litellm_params={"reasoning_effort": "medium"},
         swallow_exceptions=True,
     ),
 )
@@ -1188,7 +1203,7 @@ W&B runとの関連付け:
   - downloaded tau retail source metadata
   - SFT JSONL derived from `lefft/tau-dev-task-retail-v1`
   - Weave eval holdout rows
-  - optional tau2/tau3 retail task cache
+  - optional tau2 retail task cache
 - `configs/`
   - local tiny
   - local 7B

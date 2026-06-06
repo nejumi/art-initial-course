@@ -9,9 +9,9 @@ import os
 import platform
 import sys
 
-from course.shared.config import config_from_env, mask_secret
+from course.shared.config import COURSE_DOTENV_PATH, DOTENV_LOADED, available_model_profiles, config_from_env, mask_secret
 
-PACKAGES = ["art", "openpipe-art", "wandb", "weave", "datasets", "torch", "transformers", "openai"]
+PACKAGES = ["art", "openpipe-art", "wandb", "weave", "datasets", "torch", "transformers", "openai", "python-dotenv"]
 
 
 def version_for(package: str) -> str:
@@ -29,6 +29,13 @@ def main() -> None:
     print("Entity:", cfg.entity or "<unset>")
     print("ART path:", cfg.art_path)
     print("Dataset:", cfg.dataset_id)
+    print(".env path:", COURSE_DOTENV_PATH)
+    print(".env present:", COURSE_DOTENV_PATH.exists())
+    print(".env loaded:", DOTENV_LOADED)
+    print("Model profile:", cfg.model_profile)
+    print("Base model:", cfg.base_model)
+    print("Inference model:", cfg.inference_model_name or os.getenv("OPENAI_MODEL") or "gpt-4.1-mini")
+    print("Available profiles:", ", ".join(sorted(available_model_profiles())))
     print("WANDB_API_KEY:", mask_secret(os.getenv("WANDB_API_KEY")))
     print("OPENAI_API_KEY:", mask_secret(os.getenv("OPENAI_API_KEY")))
     print("\nPackages:")

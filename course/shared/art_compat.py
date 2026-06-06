@@ -39,6 +39,8 @@ def make_trainable_model(config: RetailCourseConfig) -> Any:
             "dataset": config.dataset_id,
             "task": "retail-support-agent",
             "course": "openpipe-art-wandb-weave",
+            "model_profile": config.model_profile,
+            "base_model": config.base_model,
         }
     )
     return model
@@ -48,9 +50,10 @@ def make_prompted_model(config: RetailCourseConfig, *, name: str | None = None) 
     art = require_art()
     api_key = config.inference_api_key or os.getenv("OPENAI_API_KEY")
     base_url = config.inference_base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
-    inference_name = config.inference_model_name or os.getenv("OPENAI_MODEL") or name or "gpt-4.1-mini"
+    inference_name = config.inference_model_name or os.getenv("OPENAI_MODEL") or "gpt-4.1-mini"
+    display_name = name or inference_name
     return art.Model(
-        name=name or inference_name,
+        name=display_name,
         project=config.project,
         entity=config.entity,
         inference_api_key=api_key,

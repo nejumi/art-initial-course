@@ -26,6 +26,7 @@ baseline eval、next-action SFT、SFTからのGRPO/GSPO独立分岐、eval、W&B
 runbookはtau-style RL向けに `--continue-on-invalid` をデフォルトで有効化しています。最終レポート用には `--eval-rollouts-per-scenario 4 --eval-temperature 0.2` を加えると、pass@kとreward varianceも比較できます。
 比較結果は監査用の全列版 `checkpoint_eval_comparison.md/.csv` と、README/スライド向けの簡潔版 `checkpoint_eval_summary.md/.csv` の両方に出力されます。
 SFT warm startを強める講師向けフル検証では、英語版READMEの `--include-teacher-sft` と `--include-areal-sft` 例を使うと、公開teacher next-actionデータとAReaL tau2 SFTデータをbridgeデータに混ぜられます。
+比較後には各JSONL結果をcached predictionとしてWeave Evaluationにも流し、trace単位とstage単位の両方で確認できるようにしています。
 
 SUNK/Slurm環境では次のラッパーを使えます。
 

@@ -501,6 +501,25 @@ def compare_results(
     if not args.no_wandb_compare:
         command.append("--wandb")
     run_command("checkpoint comparison", command, env=env, dry_run=args.dry_run)
+    if not args.no_weave and not args.skip_weave_cached_evals:
+        for path, stage, model_artifact in zip(paths, stages, model_artifacts, strict=True):
+            weave_command = [
+                sys.executable,
+                "-B",
+                "course/02_weave_evals/evaluate_cached_checkpoint.py",
+                path,
+                "--stage",
+                stage,
+                "--model",
+                args.base_model,
+                "--data-artifact",
+                artifact_uri(args.data_artifact_name),
+                "--name",
+                f"{args.run_slug}-{stage}-cached-checkpoint-eval",
+            ]
+            if model_artifact != "-":
+                weave_command += ["--model-artifact", model_artifact]
+            run_command(f"Weave cached eval {stage}", weave_command, env=env, dry_run=args.dry_run)
 
 
 def parse_args() -> argparse.Namespace:
@@ -587,6 +606,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-sft-eval", action="store_true")
     parser.add_argument("--skip-rl", action="store_true")
     parser.add_argument("--skip-compare", action="store_true")
+    parser.add_argument(
+        "--skip-weave-cached-evals",
+        action="store_true",
+        help="Skip publishing cached JSONL checkpoint results as Weave Evaluations after comparison.",
+    )
     parser.add_argument("--no-weave", action="store_true")
     parser.add_argument("--no-wandb-compare", action="store_true")
     parser.add_argument("--dry-run", action="store_true")

@@ -181,13 +181,14 @@ SFT is intentionally chunked: one ART SFT call produces one ART checkpoint/log p
 
 SFT also runs a tokenization preflight. By default, rows that exceed `ART_MAX_SEQ_LENGTH` are filtered before training so the loss curve does not contain zero-loss batches from examples that ART drops internally. Use `--keep-overlength-sft-rows` only when you explicitly want to inspect ART's raw drop behavior.
 
-Training scripts use W&B Artifacts for lineage:
+Training scripts use W&B Artifacts and Weave Evaluations for lineage:
 
 - `retail-course-data:latest` contains the TAU Retail JSONL splits plus generated `sft_train.jsonl`.
 - Data artifacts include all `sft*.jsonl` files plus summary JSON files in the data directory, so full-trajectory, next-action, teacher-mixed, and AReaL-derived SFT variants can be traced.
 - SFT logs the latest local ART LoRA checkpoint as `<ART_MODEL_NAME>-checkpoint:sft-anchor`, including the exact `sft_file` and `sft_mask_mode` in checkpoint metadata.
 - GRPO, GSPO, and RULER runs call `use_artifact` on the SFT checkpoint and log their own branch checkpoint artifacts.
 - Eval runs can call `use_artifact` on both the dataset and the evaluated checkpoint, while Weave stores rollout traces.
+- After checkpoint comparison, the runbook publishes each cached JSONL result as a Weave Evaluation using the same scorer set, so instructors can inspect both trace-level behavior and stage-level eval summaries without rerunning rollouts.
 
 Reward and SFT data design notes: [course/04_grpo_local/reward_and_sft_design_notes.md](course/04_grpo_local/reward_and_sft_design_notes.md).
 
@@ -235,7 +236,7 @@ The table below is retained as an older diagnostic run with strict reference-tra
 
 Current tau-style diagnostics show that naive full-trajectory SFT on the small curriculum slice does not reliably beat the baseline. The course therefore treats full-trajectory SFT as a teaching baseline and validates next-action SFT before using an SFT checkpoint as the parent for GRPO/GSPO/RULER.
 
-W&B Artifacts are logged for the dataset, the SFT checkpoint, and each RL branch checkpoint. The comparison script logs a horizontal W&B table with columns such as `model`, `stage`, `model_artifact_path`, `reward`, `task_success`, and delta metrics, while Weave stores rollout and eval traces.
+W&B Artifacts are logged for the dataset, the SFT checkpoint, and each RL branch checkpoint. The comparison script logs a horizontal W&B table with columns such as `model`, `stage`, `model_artifact_path`, `reward`, `task_success`, and delta metrics, while Weave stores rollout traces and cached checkpoint Evaluations.
 RL training logs also include signal-quality diagnostics: reward range/std before and after zero-variance filtering, winner-minus-loser gaps for outcome/state-action metrics, state-action attempt/reached rates, and tau-style reward components. These columns are meant to prove that GRPO/GSPO is optimizing agentic behavior rather than noise from read-only replay differences.
 The runbook writes both full audit tables (`checkpoint_eval_comparison.md/.csv`) and compact presentation tables (`checkpoint_eval_summary.md/.csv`).
 

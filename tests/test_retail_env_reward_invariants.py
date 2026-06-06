@@ -19,6 +19,7 @@ record_to_next_action_examples = importlib.import_module(
 ).record_to_next_action_examples
 teacher_sft = importlib.import_module("course.03_sft_warmup.make_teacher_next_action_sft_jsonl")
 areal_sft = importlib.import_module("course.03_sft_warmup.make_areal_retail_sft_jsonl")
+cached_weave_eval = importlib.import_module("course.02_weave_evals.evaluate_cached_checkpoint")
 
 
 def assistant_tool_call(name: str, arguments: dict[str, object]) -> dict[str, object]:
@@ -220,6 +221,29 @@ class RetailRewardInvariantTests(unittest.TestCase):
         )
 
         self.assertIsNone(example)
+
+    def test_cached_weave_eval_rows_keep_horizontal_stage_metadata(self) -> None:
+        dataset_rows, outputs = cached_weave_eval.build_cached_eval_rows(
+            [
+                {
+                    "scenario_id": "retail-1",
+                    "rollout_index": 0,
+                    "reward": 0.75,
+                    "metrics": {"outcome_success": 1.0},
+                    "logs": {"duration": 3.5},
+                }
+            ],
+            stage="grpo",
+            model="LiquidAI/LFM2.5-8B-A1B",
+            model_artifact="retail-support-agent-checkpoint:grpo",
+        )
+
+        self.assertEqual(len(dataset_rows), 1)
+        row_id = dataset_rows[0]["row_id"]
+        self.assertEqual(dataset_rows[0]["stage"], "grpo")
+        self.assertEqual(dataset_rows[0]["model_artifact_path"], "retail-support-agent-checkpoint:grpo")
+        self.assertEqual(outputs[row_id]["metrics"]["outcome_success"], 1.0)
+        self.assertEqual(outputs[row_id]["metadata"]["model"], "LiquidAI/LFM2.5-8B-A1B")
 
     def test_sample_return_tool_is_state_changing(self) -> None:
         scenario = scenario_from_record(sample_records()[1], split="validation", index=0)

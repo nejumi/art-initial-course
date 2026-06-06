@@ -86,7 +86,7 @@ def weave_args(args: argparse.Namespace) -> list[str]:
 
 def build_or_refresh_data(args: argparse.Namespace, env: dict[str, str]) -> None:
     if not args.build_bridge and (args.data_dir / "train.jsonl").exists():
-        if args.include_teacher_sft or args.include_areal_sft:
+        if args.include_teacher_sft or args.include_areal_sft or args.include_success_trace_sft:
             build_augmented_sft(args, env)
         return
     if not (args.source_dir / "train.jsonl").exists():
@@ -138,17 +138,20 @@ def build_or_refresh_data(args: argparse.Namespace, env: dict[str, str]) -> None
         env=env,
         dry_run=args.dry_run,
     )
-    if args.include_teacher_sft or args.include_areal_sft:
+    if args.include_teacher_sft or args.include_areal_sft or args.include_success_trace_sft:
         build_augmented_sft(args, env)
 
 
 def augmented_sft_file(args: argparse.Namespace) -> Path:
-    if args.include_teacher_sft and args.include_areal_sft:
-        return args.data_dir / "sft_train_next_action_teacher_areal_mix.jsonl"
+    labels = []
     if args.include_teacher_sft:
-        return args.data_dir / "sft_train_next_action_teacher_mix.jsonl"
+        labels.append("teacher")
     if args.include_areal_sft:
-        return args.data_dir / "sft_train_next_action_areal_mix.jsonl"
+        labels.append("areal")
+    if args.include_success_trace_sft:
+        labels.append("success_trace")
+    if labels:
+        return args.data_dir / f"sft_train_next_action_{'_'.join(labels)}_mix.jsonl"
     return args.data_dir / "sft_train_next_action.jsonl"
 
 
@@ -167,6 +170,11 @@ def build_augmented_sft(args: argparse.Namespace, env: dict[str, str]) -> None:
         inputs.append(areal_file)
         limits.append(args.areal_sft_limit)
         source_labels.append("areal")
+    if args.include_success_trace_sft:
+        success_trace_file = build_success_trace_sft(args, env)
+        inputs.append(success_trace_file)
+        limits.append(args.success_trace_sft_limit)
+        source_labels.append("success-trace")
 
     mixed_file = augmented_sft_file(args)
     run_command(
@@ -247,6 +255,42 @@ def build_areal_sft(args: argparse.Namespace, env: dict[str, str]) -> Path:
         dry_run=args.dry_run,
     )
     return areal_file
+
+
+def build_success_trace_sft(args: argparse.Namespace, env: dict[str, str]) -> Path:
+    success_trace_file = args.data_dir / "sft_success_trace_retail_next_action.jsonl"
+    full_trace_file = args.data_dir / "sft_success_trace_retail_full.jsonl"
+    command = [
+        sys.executable,
+        "-B",
+        "course/03_sft_warmup/make_success_trace_retail_sft_jsonl.py",
+        "--dataset-id",
+        args.success_trace_sft_dataset,
+        "--split",
+        args.success_trace_sft_split,
+        "--tools-data-dir",
+        path_arg(args.data_dir),
+        "--output",
+        path_arg(success_trace_file),
+        "--full-output",
+        path_arg(full_trace_file),
+        "--limit",
+        str(args.success_trace_sft_limit),
+        "--min-reward",
+        str(args.success_trace_sft_min_reward),
+    ]
+    command += maybe_append("--max-source-rows", args.success_trace_sft_max_source_rows)
+    if not args.success_trace_sft_require_blind_strict:
+        command.append("--no-require-blind-strict")
+    if args.success_trace_sft_allow_memory_injected:
+        command.append("--allow-memory-injected")
+    run_command(
+        "convert successful tau2 retail trace SFT data",
+        command,
+        env=env,
+        dry_run=args.dry_run,
+    )
+    return success_trace_file
 
 
 def evaluate_command(
@@ -581,6 +625,26 @@ def parse_args() -> argparse.Namespace:
         "--areal-sft-allow-uncertain-correct",
         action="store_true",
         help="Allow AReaL rows where metadata.correct is absent; the default keeps only correct rows.",
+    )
+    parser.add_argument("--include-success-trace-sft", action="store_true")
+    parser.add_argument(
+        "--success-trace-sft-dataset",
+        default="KermitCO/qwen3.5-9B-tau2bench-retail-traces",
+    )
+    parser.add_argument("--success-trace-sft-split", default="train")
+    parser.add_argument("--success-trace-sft-limit", type=int, default=200)
+    parser.add_argument("--success-trace-sft-min-reward", type=float, default=1.0)
+    parser.add_argument("--success-trace-sft-max-source-rows", type=int, default=None)
+    parser.add_argument(
+        "--success-trace-sft-require-blind-strict",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Keep only traces with the public C_blind_strict quality flag by default.",
+    )
+    parser.add_argument(
+        "--success-trace-sft-allow-memory-injected",
+        action="store_true",
+        help="Allow traces generated with explicit memory/rule injection. Defaults to clean non-memory traces.",
     )
     parser.add_argument("--reward-profile", default="tau_irc")
     parser.add_argument("--max-completion-tokens", type=int, default=768)

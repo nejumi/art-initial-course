@@ -19,6 +19,7 @@ record_to_next_action_examples = importlib.import_module(
 ).record_to_next_action_examples
 teacher_sft = importlib.import_module("course.03_sft_warmup.make_teacher_next_action_sft_jsonl")
 areal_sft = importlib.import_module("course.03_sft_warmup.make_areal_retail_sft_jsonl")
+success_trace_sft = importlib.import_module("course.03_sft_warmup.make_success_trace_retail_sft_jsonl")
 cached_weave_eval = importlib.import_module("course.02_weave_evals.evaluate_cached_checkpoint")
 stage_acceptance = importlib.import_module("course.02_weave_evals.check_stage_acceptance")
 
@@ -219,6 +220,88 @@ class RetailRewardInvariantTests(unittest.TestCase):
             dataset_id="areal/example",
             require_correct=True,
             min_reward=1.0,
+        )
+
+        self.assertIsNone(example)
+
+    def test_success_trace_conversion_adds_system_and_tool_ids(self) -> None:
+        row = {
+            "task_id": "retail-7",
+            "messages": [
+                {"role": "assistant", "content": "Hi! How can I help you today?"},
+                {"role": "user", "content": "Please cancel order O-1001."},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"name": "get_order_details", "arguments": {"order_id": "O-1001"}}],
+                },
+                {"role": "tool", "content": "{\"status\":\"pending\"}"},
+                {"role": "assistant", "content": "I can cancel that pending order."},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"name": "cancel_pending_order", "arguments": {"order_id": "O-1001"}}],
+                },
+                {"role": "tool", "content": "{\"status\":\"canceled\"}"},
+                {"role": "assistant", "content": "Done."},
+            ],
+            "canonical_reward": 1.0,
+            "condition_flags": {"C_blind_strict": True},
+            "memory_injected": False,
+            "model": "Qwen/Qwen3.5-9B",
+        }
+
+        example = success_trace_sft.convert_trace_row(
+            row,
+            row_index=0,
+            tools=sample_records()[0]["tools"],
+            dataset_id="success/example",
+            split="train",
+            system_message="You are a retail support agent.",
+            drop_unknown_tools=True,
+            min_reward=1.0,
+            require_blind_strict=True,
+            allow_memory_injected=False,
+        )
+
+        self.assertIsNotNone(example)
+        assert example is not None
+        self.assertEqual(example["messages"][0]["role"], "system")
+        first_call = example["messages"][3]["tool_calls"][0]
+        first_tool = example["messages"][4]
+        self.assertEqual(first_tool["tool_call_id"], first_call["id"])
+        self.assertEqual(example["metadata"]["sft_format"], "tau2-retail-success-trace-full")
+
+        next_actions = success_trace_sft.to_next_action_examples([example])
+        self.assertGreaterEqual(len(next_actions), 2)
+        self.assertTrue(all(row["metadata"]["sft_format"] == "tau2-retail-success-trace-next-action" for row in next_actions))
+
+    def test_success_trace_conversion_filters_memory_injected_rows(self) -> None:
+        row = {
+            "task_id": "retail-memory",
+            "messages": [
+                {"role": "user", "content": "Please cancel order O-1001."},
+                {
+                    "role": "assistant",
+                    "tool_calls": [{"name": "cancel_pending_order", "arguments": {"order_id": "O-1001"}}],
+                },
+            ],
+            "canonical_reward": 1.0,
+            "condition_flags": {"C_blind_strict": True},
+            "memory_injected": True,
+        }
+
+        example = success_trace_sft.convert_trace_row(
+            row,
+            row_index=0,
+            tools=sample_records()[0]["tools"],
+            dataset_id="success/example",
+            split="train",
+            system_message="You are a retail support agent.",
+            drop_unknown_tools=True,
+            min_reward=1.0,
+            require_blind_strict=True,
+            allow_memory_injected=False,
         )
 
         self.assertIsNone(example)

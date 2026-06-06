@@ -45,6 +45,7 @@ Public SFT sources used or referenced by the course:
 | `lefft/tau-dev-task-retail-v1` | Successful full-dialog retail trajectories with OpenAI-compatible tool calls | Main open-data source, replay-env validation, and per-turn next-action SFT after expansion |
 | `inclusionAI/AReaL-tau2-data` | tau2-style next-action SFT/RL rows with `messages`, `answer`, and metadata | Advanced SFT data construction and comparison to recent verifiable-reward agent training recipes |
 | `amityco/tau-bench-retail-train-next-action-all-step-score-v0.2` | Retail next-action examples with candidate responses and scores | Optional public teacher warm start; convert high-score rows and train with last-answer-only SFT |
+| `KermitCO/qwen3.5-9B-tau2bench-retail-traces` | Retail-only tau2 traces with canonical reward and judge-quality fields | Strong success-trace warm start; default converter keeps reward-1, non-memory, blind-strict traces and expands them to next-action SFT |
 | `Jarrodbarnes/tau2-sft-v4-dataset` | Expert tau2 prompts/responses with explicit thinking-tag instructions | Reference only unless reasoning tags and tool dialect are cleaned first |
 
 Before training, normalize demonstrations:
@@ -63,7 +64,8 @@ The course now exposes both formats:
 - `make_next_action_sft_jsonl.py` expands each full trajectory into per-turn next-action rows and should use `--sft-mask-mode last-assistant`.
 - `make_teacher_next_action_sft_jsonl.py` converts scored public teacher next-action rows from `amityco/...all-step-score-v0.2`; use it when the base bridge SFT is too weak for convincing RL.
 - `make_areal_retail_sft_jsonl.py` converts AReaL tau2 retail next-action rows and should also use `--sft-mask-mode last-assistant`.
-- `mix_sft_jsonl.py` mixes bridge, teacher, and advanced SFT sources while preserving source metadata for W&B artifact lineage.
+- `make_success_trace_retail_sft_jsonl.py` converts successful tau2 retail traces into next-action rows. It prepends the local retail system prompt, assigns missing tool-call IDs, attaches the local tool schema, and filters to clean reward-1 traces by default.
+- `mix_sft_jsonl.py` mixes bridge, teacher, AReaL, and success-trace SFT sources while preserving source metadata for W&B artifact lineage.
 - `make_bridge_curriculum.py` builds a shorter first RL curriculum from successful trajectories with a bounded number of state-changing actions. This is useful for proving that RL can improve a verifiable state/action objective before moving to the broader retail split.
 
 Do not promote an SFT checkpoint to the RL parent just because the loss decreases. First compare it to the base model with Weave evals and a horizontal W&B table. For this lab, a usable SFT parent should improve or at least preserve `outcome_success` and `task_success`, while also improving tool-call diagnostics such as `tool_name_f1`, `tool_argument_match`, or state-changing action correctness.
@@ -78,6 +80,8 @@ For a production-quality or advanced course variant, consider swapping in or com
 The helper `course/03_sft_warmup/make_teacher_next_action_sft_jsonl.py` converts the scored amityco rows into ART-compatible next-action JSONL. The default filter keeps rows with `total_score >= 1.0` and `avg_score >= 1.0`, drops answer turns with unknown tools, and attaches the canonical retail tool schema from the local bridge data. The instructor runbook can enable this with `--include-teacher-sft`, producing `sft_train_next_action_teacher_mix.jsonl` plus a JSON summary that is included in the W&B data artifact.
 
 The helper `course/03_sft_warmup/make_areal_retail_sft_jsonl.py` converts the retail, correct rows from `inclusionAI/AReaL-tau2-data` into ART-compatible JSONL for advanced experiments. It strips `thinking`, removes `None` tool arguments, assigns missing tool-call IDs, and attaches the canonical retail tool schemas from a local TAU retail data directory.
+
+The helper `course/03_sft_warmup/make_success_trace_retail_sft_jsonl.py` converts `KermitCO/qwen3.5-9B-tau2bench-retail-traces`. It keeps canonical reward-1 traces, rejects memory-injected traces by default, requires the public `C_blind_strict` quality flag, and writes both full-trajectory and next-action files. In a current validation snapshot, the converter found 132 clean successful trajectories and expanded them to 512 next-action rows with zero LFM2.5 tokenization drops at 16k sequence length.
 
 The Jarrod Barnes tau2 SFT dataset is useful as a teacher-data reference, but its prompts explicitly request `<thinking>` tags. Do not use it unfiltered with LFM Thinking models in this lab; first remove reasoning-tag instructions and convert tool calls to the same OpenAI-compatible dialect used at inference time.
 

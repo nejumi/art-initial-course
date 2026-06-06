@@ -8,7 +8,7 @@ The main task is a Retail Customer Support Agent based on open retail tool-calli
 
 - `lefft/tau-dev-task-retail-v1` for SFT and workflow validation
 - tau-bench / tau2-bench retail concepts for rollout, reward, and eval design
-- optional tau2-style next-action SFT data from `amityco/...` and `inclusionAI/AReaL-tau2-data`
+- optional tau2-style next-action SFT data from `amityco/...`, `inclusionAI/AReaL-tau2-data`, and successful public tau2 retail traces
 
 The code is structured so the early labs can be inspected without a GPU. Local ART training labs require a CUDA-capable GPU and `openpipe-art[backend]`.
 
@@ -21,6 +21,7 @@ The course intentionally uses public datasets so a workshop can run end to end w
 | [`lefft/tau-dev-task-retail-v1`](https://huggingface.co/datasets/lefft/tau-dev-task-retail-v1) | Default SFT and evaluation data | Successful retail trajectories already serialized in OpenAI tool-call format | Downloaded by `download_tau_retail.py`; converted to `sft_*.jsonl` |
 | [`amityco/tau-bench-retail-train-next-action-all-step-score-v0.2`](https://huggingface.co/datasets/amityco/tau-bench-retail-train-next-action-all-step-score-v0.2) | Optional teacher next-action SFT | Step-level retail tool-call rows with candidate scores | Converted by `make_teacher_next_action_sft_jsonl.py`; can be mixed with bridge next-action rows |
 | [`inclusionAI/AReaL-tau2-data`](https://huggingface.co/datasets/inclusionAI/AReaL-tau2-data) | Advanced next-action SFT option | Mirrors recent tau2-style SFT + verifiable-reward RL workflows | Converted by `make_areal_retail_sft_jsonl.py`; strips thinking fields and normalizes tool calls |
+| [`KermitCO/qwen3.5-9B-tau2bench-retail-traces`](https://huggingface.co/datasets/KermitCO/qwen3.5-9B-tau2bench-retail-traces) | Success-trace SFT warm start | Retail-only tau2 traces with canonical reward and judge-quality fields | Converted by `make_success_trace_retail_sft_jsonl.py`; defaults to non-memory, blind-strict, reward-1 traces |
 | [`Jarrodbarnes/Qwen3-4B-tau2-grpo-v1`](https://huggingface.co/Jarrodbarnes/Qwen3-4B-tau2-grpo-v1) | Prior-art reference | Public model card documents SFT -> RFT -> GRPO, turn-level shaping, and tau2 eval settings | Not used as course weights by default; informs the training/eval recipe |
 
 Full-dialog SFT is easy to explain, but it can over-supervise long dialogue style and final responses. Next-action SFT is the stronger path when we want to align with modern agent training recipes and avoid training on every prior assistant action repeatedly.
@@ -88,21 +89,23 @@ python course/09_runbooks/run_retail_agentic_sequence.py \
   --rl-algos grpo,gspo
 ```
 
-For a research-aligned instructor validation pass, mix both public teacher rows and AReaL tau2 SFT rows:
+For a research-aligned instructor validation pass, mix public teacher rows, AReaL tau2 SFT rows, and successful tau2 retail traces:
 
 ```bash
 python course/09_runbooks/run_retail_agentic_sequence.py \
-  --run-slug lfm25-8b-a1b-bridge-state1-teacher-areal \
+  --run-slug lfm25-8b-a1b-bridge-state1-teacher-areal-success \
   --base-model LiquidAI/LFM2.5-8B-A1B \
   --data-dir data/retail_bridge_state1 \
   --source-dir data/retail \
-  --data-artifact-name retail-course-data-bridge-state1-teacher-areal \
+  --data-artifact-name retail-course-data-bridge-state1-teacher-areal-success \
   --build-bridge \
   --include-teacher-sft \
   --teacher-sft-limit 512 \
   --include-areal-sft \
   --areal-sft-limit 512 \
-  --sft-max-steps 192 \
+  --include-success-trace-sft \
+  --success-trace-sft-limit 512 \
+  --sft-max-steps 240 \
   --rl-steps 48 \
   --rl-algos grpo,gspo
 ```
@@ -129,16 +132,23 @@ python course/03_sft_warmup/make_areal_retail_sft_jsonl.py \
   --output data/retail_bridge_state1/sft_areal_retail_next_action.jsonl \
   --limit 512
 
+python course/03_sft_warmup/make_success_trace_retail_sft_jsonl.py \
+  --tools-data-dir data/retail_bridge_state1 \
+  --output data/retail_bridge_state1/sft_success_trace_retail_next_action.jsonl \
+  --full-output data/retail_bridge_state1/sft_success_trace_retail_full.jsonl \
+  --limit 512
+
 python course/03_sft_warmup/mix_sft_jsonl.py \
   --inputs \
     data/retail_bridge_state1/sft_train_next_action.jsonl \
     data/retail_bridge_state1/sft_teacher_retail_next_action.jsonl \
     data/retail_bridge_state1/sft_areal_retail_next_action.jsonl \
-  --limits -1 512 512 \
-  --output data/retail_bridge_state1/sft_train_next_action_teacher_areal_mix.jsonl
+    data/retail_bridge_state1/sft_success_trace_retail_next_action.jsonl \
+  --limits -1 512 512 512 \
+  --output data/retail_bridge_state1/sft_train_next_action_teacher_areal_success_trace_mix.jsonl
 ```
 
-The default course path uses compact TAU retail trajectories. The bridge curriculum keeps short successful trajectories with exactly one state-changing action, which is useful for proving that agentic RL can improve a verifiable outcome before moving to the broader retail curriculum. The teacher and AReaL converters are provided for stronger warm starts and advanced experiments that want to align SFT data construction with recent tau2-style multi-turn tool-agent work.
+The default course path uses compact TAU retail trajectories. The bridge curriculum keeps short successful trajectories with exactly one state-changing action, which is useful for proving that agentic RL can improve a verifiable outcome before moving to the broader retail curriculum. The teacher, AReaL, and success-trace converters are provided for stronger warm starts and advanced experiments that want to align SFT data construction with recent tau2-style multi-turn tool-agent work.
 
 Next-action SFT should be trained with last-assistant masking:
 
@@ -185,7 +195,7 @@ SFT also runs a tokenization preflight. By default, rows that exceed `ART_MAX_SE
 Training scripts use W&B Artifacts and Weave Evaluations for lineage:
 
 - `retail-course-data:latest` contains the TAU Retail JSONL splits plus generated `sft_train.jsonl`.
-- Data artifacts include all `sft*.jsonl` files plus summary JSON files in the data directory, so full-trajectory, next-action, teacher-mixed, and AReaL-derived SFT variants can be traced.
+- Data artifacts include all `sft*.jsonl` files plus summary JSON files in the data directory, so full-trajectory, next-action, teacher-mixed, AReaL-derived, and success-trace SFT variants can be traced.
 - SFT logs the latest local ART LoRA checkpoint as `<ART_MODEL_NAME>-checkpoint:sft-anchor`, including the exact `sft_file` and `sft_mask_mode` in checkpoint metadata.
 - GRPO, GSPO, and RULER runs call `use_artifact` on the SFT checkpoint and log their own branch checkpoint artifacts.
 - Eval runs can call `use_artifact` on both the dataset and the evaluated checkpoint, while Weave stores rollout traces.

@@ -16,6 +16,32 @@ def has_reward_signal(group: Any, *, tolerance: float = 1e-9) -> bool:
     return max(rewards) - min(rewards) > tolerance
 
 
+AGENTIC_SIGNAL_KEYS = [
+    "outcome_success",
+    "task_success",
+    "state_action_sequence_match",
+    "valid_state_action_rate",
+    "state_action_reached_rate",
+    "bad_state_action",
+    "missing_state_action",
+]
+
+
+def has_agentic_signal(group: Any, *, tolerance: float = 1e-9) -> bool:
+    trajectories = list(getattr(group, "trajectories", []))
+    if len(trajectories) < 2:
+        return False
+    for key in AGENTIC_SIGNAL_KEYS:
+        values = [
+            value
+            for trajectory in trajectories
+            if (value := _trajectory_metric(trajectory, key)) is not None
+        ]
+        if len(values) >= 2 and max(values) - min(values) > tolerance:
+            return True
+    return False
+
+
 def split_reward_signal_groups(
     groups: list[Any],
     *,
@@ -97,6 +123,41 @@ def _mixed_success_rate(groups: list[Any], key: str = "outcome_success") -> floa
     return mixed / eligible if eligible else math.nan
 
 
+def _mixed_metric_rate(groups: list[Any], key: str, *, tolerance: float = 1e-9) -> float:
+    mixed = 0
+    eligible = 0
+    for group in groups:
+        values = [
+            value
+            for trajectory in getattr(group, "trajectories", [])
+            if (value := _trajectory_metric(trajectory, key)) is not None
+        ]
+        if len(values) < 2:
+            continue
+        eligible += 1
+        if max(values) - min(values) > tolerance:
+            mixed += 1
+    return mixed / eligible if eligible else math.nan
+
+
+def _mixed_any_metric_rate(groups: list[Any], keys: list[str], *, tolerance: float = 1e-9) -> float:
+    mixed = 0
+    eligible = 0
+    for group in groups:
+        trajectories = list(getattr(group, "trajectories", []))
+        if len(trajectories) < 2:
+            continue
+        eligible += 1
+        for key in keys:
+            values = [
+                value for trajectory in trajectories if (value := _trajectory_metric(trajectory, key)) is not None
+            ]
+            if len(values) >= 2 and max(values) - min(values) > tolerance:
+                mixed += 1
+                break
+    return mixed / eligible if eligible else math.nan
+
+
 def _group_fraction(groups: list[Any], predicate: Any) -> float:
     eligible = 0
     matches = 0
@@ -147,8 +208,23 @@ def group_diagnostic_metrics(groups: list[Any], *, prefix: str = "data/step") ->
     metrics = {
         f"{prefix}_reward_range_mean": mean(ranges),
         f"{prefix}_reward_std_mean": mean(stds),
+        f"{prefix}_agentic_signal_group_rate": _group_fraction(
+            groups,
+            lambda trajectories: has_agentic_signal(SimpleTrajectoryGroup(trajectories)),
+        ),
+        f"{prefix}_reward_only_signal_group_rate": _group_fraction(
+            groups,
+            lambda trajectories: has_reward_signal(SimpleTrajectoryGroup(trajectories))
+            and not has_agentic_signal(SimpleTrajectoryGroup(trajectories)),
+        ),
         f"{prefix}_outcome_success_mixed_group_rate": _mixed_success_rate(groups, "outcome_success"),
         f"{prefix}_task_success_mixed_group_rate": _mixed_success_rate(groups, "task_success"),
+        f"{prefix}_mixed_state_action_sequence_group_rate": _mixed_metric_rate(
+            groups, "state_action_sequence_match"
+        ),
+        f"{prefix}_mixed_bad_or_missing_state_action_group_rate": _mixed_any_metric_rate(
+            groups, ["bad_state_action", "missing_state_action"]
+        ),
         f"{prefix}_all_equal_reward_group_rate": _group_fraction(
             groups,
             lambda trajectories: len({round(float(getattr(trajectory, "reward", 0.0)), 10) for trajectory in trajectories})
@@ -210,3 +286,8 @@ def reward_signal_metrics(groups: list[Any], *, prefix: str = "data/step") -> di
     }
     metrics.update(group_diagnostic_metrics(groups, prefix=prefix))
     return {key: value for key, value in metrics.items() if not math.isnan(value)}
+
+
+class SimpleTrajectoryGroup:
+    def __init__(self, trajectories: list[Any]) -> None:
+        self.trajectories = trajectories

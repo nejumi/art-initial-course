@@ -9,6 +9,9 @@ from typing import Any
 
 DEFAULT_COLUMNS = [
     "data/step_reward_mean",
+    "data/step_reward_range_mean",
+    "data/step_agentic_signal_group_rate",
+    "data/step_reward_only_signal_group_rate",
     "data/step_outcome_success_mean",
     "data/step_task_success_mean",
     "data/step_state_action_sequence_match_mean",

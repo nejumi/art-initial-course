@@ -150,6 +150,8 @@ The GRPO and GSPO scripts implement dynamic filtering before each training step.
 
 - `data/step_num_groups_sampled_before_filter`
 - `data/step_num_groups_dropped_no_reward_signal`
+- `data/step_agentic_signal_group_rate`
+- `data/step_reward_only_signal_group_rate`
 - `data/sample_all_equal_reward_group_rate`
 - `data/dropped_all_outcome_failure_group_rate`
 - `data/dropped_all_truncated_group_rate`

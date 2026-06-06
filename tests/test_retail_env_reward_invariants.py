@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from course.shared.config import RetailCourseConfig
 from course.shared.data import normalize_record, sample_records, scenario_from_record
 from course.shared.metrics_io import append_step_metrics
-from course.shared.rl_sampling import reward_signal_metrics
+from course.shared.rl_sampling import has_agentic_signal, reward_signal_metrics
 from course.shared.retail_env import ReplayRetailEnv, is_state_changing_tool
 from course.shared.rewards import score_messages
 from course.shared.wandb_artifacts import checkpoint_artifact_aliases, latest_checkpoint_dir, select_checkpoint_dir
@@ -805,9 +805,49 @@ class RetailRewardInvariantTests(unittest.TestCase):
         self.assertEqual(metrics["data/test_outcome_success_mixed_group_rate"], 1.0)
         self.assertEqual(metrics["data/test_winner_minus_loser_outcome_success"], 1.0)
         self.assertEqual(metrics["data/test_winner_minus_loser_bad_state_action"], -1.0)
+        self.assertEqual(metrics["data/test_agentic_signal_group_rate"], 1.0)
+        self.assertEqual(metrics["data/test_reward_only_signal_group_rate"], 0.0)
+        self.assertEqual(metrics["data/test_mixed_state_action_sequence_group_rate"], 1.0)
+        self.assertEqual(metrics["data/test_mixed_bad_or_missing_state_action_group_rate"], 1.0)
         self.assertEqual(metrics["data/test_all_equal_reward_group_rate"], 0.0)
         self.assertEqual(metrics["data/test_all_outcome_success_group_rate"], 0.0)
         self.assertEqual(metrics["data/test_all_outcome_failure_group_rate"], 0.0)
+
+    def test_reward_signal_metrics_classify_reward_only_groups(self) -> None:
+        group = SimpleNamespace(
+            trajectories=[
+                SimpleNamespace(
+                    reward=0.1,
+                    metrics={
+                        "outcome_success": 0.0,
+                        "task_success": 0.0,
+                        "state_action_sequence_match": 0.0,
+                        "valid_state_action_rate": 0.0,
+                        "state_action_reached_rate": 0.0,
+                        "bad_state_action": 0.0,
+                        "missing_state_action": 1.0,
+                    },
+                ),
+                SimpleNamespace(
+                    reward=0.2,
+                    metrics={
+                        "outcome_success": 0.0,
+                        "task_success": 0.0,
+                        "state_action_sequence_match": 0.0,
+                        "valid_state_action_rate": 0.0,
+                        "state_action_reached_rate": 0.0,
+                        "bad_state_action": 0.0,
+                        "missing_state_action": 1.0,
+                    },
+                ),
+            ]
+        )
+
+        metrics = reward_signal_metrics([group], prefix="data/test")
+
+        self.assertFalse(has_agentic_signal(group))
+        self.assertEqual(metrics["data/test_agentic_signal_group_rate"], 0.0)
+        self.assertEqual(metrics["data/test_reward_only_signal_group_rate"], 1.0)
 
     def test_reward_signal_metrics_classify_no_signal_failure_groups(self) -> None:
         group = SimpleNamespace(
@@ -840,6 +880,8 @@ class RetailRewardInvariantTests(unittest.TestCase):
         metrics = reward_signal_metrics([group], prefix="data/drop")
 
         self.assertEqual(metrics["data/drop_all_equal_reward_group_rate"], 1.0)
+        self.assertEqual(metrics["data/drop_agentic_signal_group_rate"], 0.0)
+        self.assertEqual(metrics["data/drop_reward_only_signal_group_rate"], 0.0)
         self.assertEqual(metrics["data/drop_all_outcome_failure_group_rate"], 1.0)
         self.assertEqual(metrics["data/drop_all_truncated_group_rate"], 1.0)
         self.assertEqual(metrics["data/drop_any_truncated_group_rate"], 1.0)

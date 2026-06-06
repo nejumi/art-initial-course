@@ -28,6 +28,8 @@ PRIMARY_KEYS = [
 
 TRAIN_SIGNAL_KEYS = [
     "data/train_reward_range_mean",
+    "data/train_agentic_signal_group_rate",
+    "data/train_reward_only_signal_group_rate",
     "data/step_trainable_group_fraction",
     "data/train_outcome_success_mixed_group_rate",
     "data/train_task_success_mixed_group_rate",
@@ -148,6 +150,8 @@ def train_signal_quality(train_summary: dict[str, Any] | None, criteria: Criteri
         return {"available": False, "decision": "unknown", "reason": "no train metrics provided"}
 
     reward_range = numeric(train_summary, "data/train_reward_range_mean")
+    agentic_group_rate = numeric(train_summary, "data/train_agentic_signal_group_rate")
+    reward_only_group_rate = numeric(train_summary, "data/train_reward_only_signal_group_rate")
     trainable_fraction = numeric(train_summary, "data/step_trainable_group_fraction")
     positive_agentic = [
         numeric(train_summary, "data/train_winner_minus_loser_outcome_success"),
@@ -184,6 +188,8 @@ def train_signal_quality(train_summary: dict[str, Any] | None, criteria: Criteri
         "reason": "; ".join(reasons),
         "path": train_summary.get("path"),
         "reward_range_mean": reward_range,
+        "agentic_signal_group_rate": agentic_group_rate,
+        "reward_only_signal_group_rate": reward_only_group_rate,
         "trainable_group_fraction": trainable_fraction,
         "best_positive_agentic_delta": positive_best,
         "best_error_reduction_delta": error_best,
@@ -362,8 +368,8 @@ def markdown_report(
         "",
         "## Decisions",
         "",
-        "| stage | reference | decision | reason | delta_reward | delta_outcome | delta_task | delta_state_seq | delta_bad_state | delta_missing_state | retained_sft_wins | lost_sft_wins | new_wins | retention_rate | train_reward_range | trainable_groups | train_agentic_delta |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| stage | reference | decision | reason | delta_reward | delta_outcome | delta_task | delta_state_seq | delta_bad_state | delta_missing_state | retained_sft_wins | lost_sft_wins | new_wins | retention_rate | train_reward_range | trainable_groups | agentic_groups | reward_only_groups | train_agentic_delta |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for decision in decisions:
         deltas = decision["deltas"]
@@ -403,6 +409,8 @@ def markdown_report(
                     churn_fmt("retention_rate"),
                     signal_fmt("reward_range_mean"),
                     signal_fmt("trainable_group_fraction"),
+                    signal_fmt("agentic_signal_group_rate"),
+                    signal_fmt("reward_only_signal_group_rate"),
                     signal_fmt("best_agentic_signal_delta"),
                 ]
             )

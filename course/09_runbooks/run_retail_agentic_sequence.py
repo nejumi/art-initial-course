@@ -395,11 +395,12 @@ def train_rl_branch(
     branch_model = retail_model_name(args.run_slug, branch_stage)
     branch_env = {**env, "ART_MODEL_NAME": branch_model}
     parent_artifact = artifact_uri(f"{anchor_model}-checkpoint", "sft-anchor")
-    train_script = (
-        "course/04_grpo_local/train_grpo_local.py"
-        if algo == "grpo"
-        else "course/06_gspo_and_configs/train_gspo_sequence.py"
-    )
+    train_scripts = {
+        "grpo": "course/04_grpo_local/train_grpo_local.py",
+        "gspo": "course/06_gspo_and_configs/train_gspo_sequence.py",
+        "ruler": "course/05_ruler/train_with_ruler.py",
+    }
+    train_script = train_scripts[algo]
     run_command(
         f"fork {algo} branch from SFT anchor",
         [
@@ -444,6 +445,13 @@ def train_rl_branch(
         "--gpu-cost-per-hour-usd",
         str(args.gpu_cost_per_hour_usd),
     ]
+    if algo == "ruler":
+        command += [
+            "--judge-model",
+            args.ruler_judge_model,
+            "--judge-effort",
+            args.ruler_judge_effort,
+        ]
     command += maybe_append("--max-turns", args.rl_max_turns)
     if args.continue_on_invalid:
         command.append("--continue-on-invalid")
@@ -506,7 +514,7 @@ def compare_results(
     expected_branch_models = {
         algo: retail_model_name(args.run_slug, f"{algo}-{args.rl_suffix}")
         for algo in split_csv(args.rl_algos)
-        if algo in {"grpo", "gspo"}
+        if algo in {"grpo", "gspo", "ruler"}
     }
     expected_branch_models.update(branch_models)
     for algo, branch_model in expected_branch_models.items():
@@ -676,6 +684,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rl-learning-rate", type=float, default=2e-6)
     parser.add_argument("--rl-temperature", type=float, default=0.9)
     parser.add_argument("--rl-max-turns", type=int, default=None)
+    parser.add_argument("--ruler-judge-model", default="openai/gpt-5.5")
+    parser.add_argument("--ruler-judge-effort", default="medium", choices=["low", "medium", "high", "xhigh"])
     parser.add_argument(
         "--continue-on-invalid",
         action=argparse.BooleanOptionalAction,
@@ -752,7 +762,7 @@ def main() -> None:
     branch_models: dict[str, str] = {}
     if not args.skip_rl:
         for algo in split_csv(args.rl_algos):
-            if algo not in {"grpo", "gspo"}:
+            if algo not in {"grpo", "gspo", "ruler"}:
                 raise SystemExit(f"Unsupported --rl-algos value: {algo}")
             branch_models[algo] = train_rl_branch(
                 args,

@@ -107,7 +107,7 @@ python course/09_runbooks/run_retail_agentic_sequence.py \
   --success-trace-sft-limit 512 \
   --sft-max-steps 240 \
   --rl-steps 48 \
-  --rl-algos grpo,gspo
+  --rl-algos grpo,gspo,ruler
 ```
 
 The runbook defaults to `--continue-on-invalid` for tau-style RL. Unexpected state-changing actions are still penalized, but rollouts continue long enough for final state/action and communication rewards to be observed. Use `--no-continue-on-invalid` only when demonstrating strict replay failure modes.
@@ -118,6 +118,8 @@ On a Slurm H100 cluster, the same flow can be launched with:
 ```bash
 sbatch course/09_runbooks/sunk_h100_retail_agentic_sequence.sbatch
 ```
+
+For the full instructor validation including RULER, pass `grpo,gspo,ruler` as the `RL_ALGOS` argument. RULER uses an external judge model, so keep it in instructor or enterprise validation runs unless the workshop budget explicitly includes judge calls.
 
 Advanced SFT data option:
 
@@ -231,7 +233,7 @@ export ART_BASE_MODEL=LiquidAI/LFM2.5-1.2B-Instruct
 
 When `ART_BASE_MODEL` points at an LFM2/LFM2.5 model, the course selects `ART_TOOL_CALL_PARSER=lfm2` automatically so vLLM can return model-generated tool calls as OpenAI-compatible `message.tool_calls`. Override `ART_TOOL_CALL_PARSER` only when validating another parser.
 
-RULER judge selection is separate from the trainable model. It defaults to `openai/gpt-5.5` with medium reasoning effort in `course/05_ruler/train_with_ruler.py`.
+RULER judge selection is separate from the trainable model. It defaults to `openai/gpt-5.5` with medium reasoning effort and can be overridden with `--ruler-judge-model` / `--ruler-judge-effort` in the runbook or `--judge-model` / `--judge-effort` in `course/05_ruler/train_with_ruler.py`.
 
 ## Diagnostic H100 Results
 

@@ -97,6 +97,45 @@ def _mixed_success_rate(groups: list[Any], key: str = "outcome_success") -> floa
     return mixed / eligible if eligible else math.nan
 
 
+def _group_fraction(groups: list[Any], predicate: Any) -> float:
+    eligible = 0
+    matches = 0
+    for group in groups:
+        trajectories = list(getattr(group, "trajectories", []))
+        if not trajectories:
+            continue
+        eligible += 1
+        if predicate(trajectories):
+            matches += 1
+    return matches / eligible if eligible else math.nan
+
+
+def _all_metric(groups: list[Any], key: str, threshold: float, *, above: bool = True) -> float:
+    def predicate(trajectories: list[Any]) -> bool:
+        values = [_trajectory_metric(trajectory, key) for trajectory in trajectories]
+        values = [value for value in values if value is not None]
+        if len(values) != len(trajectories):
+            return False
+        if above:
+            return all(value >= threshold for value in values)
+        return all(value <= threshold for value in values)
+
+    return _group_fraction(groups, predicate)
+
+
+def _any_metric(groups: list[Any], key: str, threshold: float, *, above: bool = True) -> float:
+    def predicate(trajectories: list[Any]) -> bool:
+        values = [_trajectory_metric(trajectory, key) for trajectory in trajectories]
+        values = [value for value in values if value is not None]
+        if not values:
+            return False
+        if above:
+            return any(value >= threshold for value in values)
+        return any(value <= threshold for value in values)
+
+    return _group_fraction(groups, predicate)
+
+
 def group_diagnostic_metrics(groups: list[Any], *, prefix: str = "data/step") -> dict[str, float]:
     ranges = []
     stds = []
@@ -110,6 +149,20 @@ def group_diagnostic_metrics(groups: list[Any], *, prefix: str = "data/step") ->
         f"{prefix}_reward_std_mean": mean(stds),
         f"{prefix}_outcome_success_mixed_group_rate": _mixed_success_rate(groups, "outcome_success"),
         f"{prefix}_task_success_mixed_group_rate": _mixed_success_rate(groups, "task_success"),
+        f"{prefix}_all_equal_reward_group_rate": _group_fraction(
+            groups,
+            lambda trajectories: len({round(float(getattr(trajectory, "reward", 0.0)), 10) for trajectory in trajectories})
+            <= 1,
+        ),
+        f"{prefix}_all_outcome_success_group_rate": _all_metric(groups, "outcome_success", 1.0),
+        f"{prefix}_all_outcome_failure_group_rate": _all_metric(groups, "outcome_success", 0.0, above=False),
+        f"{prefix}_all_truncated_group_rate": _all_metric(groups, "truncated_by_max_turn", 1.0),
+        f"{prefix}_any_truncated_group_rate": _any_metric(groups, "truncated_by_max_turn", 1.0),
+        f"{prefix}_all_invalid_tool_group_rate": _all_metric(groups, "invalid_tool_call", 1.0),
+        f"{prefix}_all_missing_state_action_group_rate": _all_metric(groups, "missing_state_action", 1.0),
+        f"{prefix}_all_no_state_action_reached_group_rate": _all_metric(
+            groups, "state_action_reached_rate", 0.0, above=False
+        ),
     }
     for key in [
         "outcome_success",

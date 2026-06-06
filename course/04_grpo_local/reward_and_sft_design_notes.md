@@ -111,6 +111,12 @@ The GRPO and GSPO scripts implement dynamic filtering before each training step.
 
 - `data/step_num_groups_sampled_before_filter`
 - `data/step_num_groups_dropped_no_reward_signal`
+- `data/sample_all_equal_reward_group_rate`
+- `data/dropped_all_outcome_failure_group_rate`
+- `data/dropped_all_truncated_group_rate`
+- `data/dropped_all_invalid_tool_group_rate`
+- `data/dropped_all_missing_state_action_group_rate`
+- `data/dropped_all_no_state_action_reached_group_rate`
 
 Use `--keep-zero-variance-groups` only for debugging ART's raw behavior. For the workshop's main RL runs, keep filtering enabled so each optimizer step has a real group-relative advantage signal.
 
@@ -118,7 +124,7 @@ For tau-style outcome training, use `--continue-on-invalid` unless the lab is in
 
 `--continue-on-invalid` does not make state-changing actions permissive. The replay environment only returns recorded outputs for exact current-step state-changing calls. Out-of-order or unknown state-changing calls are marked invalid and counted as `bad_state_action`; unknown tool names are always invalid. This keeps the lab aligned with tau-style outcome scoring without letting a model fake DB updates by replaying a reference mutation at the wrong time.
 
-Watch `data/step_reward_range_mean`, `data/step_outcome_success_mean`, `data/step_invalid_tool_call_mean`, `data/step_unknown_tool_call_mean`, `data/step_bad_state_action_mean`, `data/step_missing_state_action_mean`, `data/step_truncated_by_max_turn_mean`, and `data/step_num_groups_dropped_no_reward_signal` during RL. A good workshop run should show non-zero group reward range and some successful outcomes during sampling before you trust validation improvements.
+Watch `data/step_reward_range_mean`, `data/step_outcome_success_mean`, `data/step_invalid_tool_call_mean`, `data/step_unknown_tool_call_mean`, `data/step_bad_state_action_mean`, `data/step_missing_state_action_mean`, `data/step_truncated_by_max_turn_mean`, and `data/step_num_groups_dropped_no_reward_signal` during RL. If many groups are dropped, the `data/dropped_*_group_rate` metrics show whether they were all-success, all-failure, truncated, invalid-tool, missing-state-action, or never-reached-state-action groups. A good workshop run should show non-zero group reward range and some successful outcomes during sampling before you trust validation improvements.
 
 Long multi-turn retail traces can exceed the local ART packed sequence length. If the trainer warns that it is dropping tokenized trajectories over `packed_sequence_length`, either raise `ART_MAX_SEQ_LENGTH` on H100-class hardware or reduce `ART_ROLLOUT_MAX_COMPLETION_TOKENS` / `max_turns` for constrained GPUs. For final course results, prefer runs where only a small fraction of trajectories are dropped, because dropped trajectories weaken the W&B learning curves and can bias which successes the optimizer sees.
 

@@ -519,6 +519,47 @@ class RetailRewardInvariantTests(unittest.TestCase):
         self.assertEqual(metrics["data/test_outcome_success_mixed_group_rate"], 1.0)
         self.assertEqual(metrics["data/test_winner_minus_loser_outcome_success"], 1.0)
         self.assertEqual(metrics["data/test_winner_minus_loser_bad_state_action"], -1.0)
+        self.assertEqual(metrics["data/test_all_equal_reward_group_rate"], 0.0)
+        self.assertEqual(metrics["data/test_all_outcome_success_group_rate"], 0.0)
+        self.assertEqual(metrics["data/test_all_outcome_failure_group_rate"], 0.0)
+
+    def test_reward_signal_metrics_classify_no_signal_failure_groups(self) -> None:
+        group = SimpleNamespace(
+            trajectories=[
+                SimpleNamespace(
+                    reward=-0.4,
+                    metrics={
+                        "outcome_success": 0.0,
+                        "task_success": 0.0,
+                        "invalid_tool_call": 1.0,
+                        "missing_state_action": 1.0,
+                        "state_action_reached_rate": 0.0,
+                        "truncated_by_max_turn": 1.0,
+                    },
+                ),
+                SimpleNamespace(
+                    reward=-0.4,
+                    metrics={
+                        "outcome_success": 0.0,
+                        "task_success": 0.0,
+                        "invalid_tool_call": 2.0,
+                        "missing_state_action": 1.0,
+                        "state_action_reached_rate": 0.0,
+                        "truncated_by_max_turn": 1.0,
+                    },
+                ),
+            ]
+        )
+
+        metrics = reward_signal_metrics([group], prefix="data/drop")
+
+        self.assertEqual(metrics["data/drop_all_equal_reward_group_rate"], 1.0)
+        self.assertEqual(metrics["data/drop_all_outcome_failure_group_rate"], 1.0)
+        self.assertEqual(metrics["data/drop_all_truncated_group_rate"], 1.0)
+        self.assertEqual(metrics["data/drop_any_truncated_group_rate"], 1.0)
+        self.assertEqual(metrics["data/drop_all_invalid_tool_group_rate"], 1.0)
+        self.assertEqual(metrics["data/drop_all_missing_state_action_group_rate"], 1.0)
+        self.assertEqual(metrics["data/drop_all_no_state_action_reached_group_rate"], 1.0)
 
 
 if __name__ == "__main__":

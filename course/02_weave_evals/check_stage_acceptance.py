@@ -8,6 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import argparse
 import importlib
 import json
+import math
+import statistics
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,6 +26,20 @@ PRIMARY_KEYS = [
     "missing_state_action",
 ]
 
+TRAIN_SIGNAL_KEYS = [
+    "data/train_reward_range_mean",
+    "data/step_trainable_group_fraction",
+    "data/train_outcome_success_mixed_group_rate",
+    "data/train_task_success_mixed_group_rate",
+    "data/train_winner_minus_loser_outcome_success",
+    "data/train_winner_minus_loser_task_success",
+    "data/train_winner_minus_loser_state_action_sequence_match",
+    "data/train_winner_minus_loser_valid_state_action_rate",
+    "data/train_winner_minus_loser_bad_state_action",
+    "data/train_winner_minus_loser_missing_state_action",
+    "data/step_num_groups_dropped_no_reward_signal",
+]
+
 
 @dataclass(frozen=True)
 class Criteria:
@@ -35,6 +51,9 @@ class Criteria:
     rl_min_state_action_delta: float = 0.05
     rl_min_error_reduction: float = 0.05
     rl_min_retained_sft_outcome_success_rate: float = 0.75
+    rl_min_train_reward_range: float = 0.05
+    rl_min_trainable_group_fraction: float = 0.25
+    rl_min_train_agentic_delta: float = 0.01
 
 
 def numeric(summary: dict[str, Any], key: str) -> float | None:
@@ -58,6 +77,127 @@ def gte(value: float | None, threshold: float) -> bool:
 
 def lte(value: float | None, threshold: float) -> bool:
     return value is not None and value <= threshold
+
+
+def row_metric(row: dict[str, Any], key: str) -> float | None:
+    value = row.get(key)
+    if value is None and isinstance(row.get("metrics"), dict):
+        value = row["metrics"].get(key)
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return float(value)
+    return None
+
+
+def finite_mean(values: list[float]) -> float | None:
+    clean = [value for value in values if math.isfinite(value)]
+    if not clean:
+        return None
+    return float(statistics.fmean(clean))
+
+
+def summarize_train_metrics(path: Path, *, stage: str) -> dict[str, Any]:
+    rows = compare_checkpoints.read_jsonl(path)
+    non_skipped = [row for row in rows if not row.get("skipped")]
+    summary: dict[str, Any] = {
+        "stage": stage,
+        "path": str(path),
+        "rows": len(rows),
+        "non_skipped_rows": len(non_skipped),
+        "skipped_rows": len(rows) - len(non_skipped),
+    }
+    source_rows = non_skipped or rows
+    for key in TRAIN_SIGNAL_KEYS:
+        values = [value for row in source_rows if (value := row_metric(row, key)) is not None]
+        mean_value = finite_mean(values)
+        if mean_value is not None:
+            summary[key] = mean_value
+    if "data/train_reward_range_mean" not in summary:
+        fallback = finite_mean(
+            [value for row in source_rows if (value := row_metric(row, "data/step_reward_range_mean")) is not None]
+        )
+        if fallback is not None:
+            summary["data/train_reward_range_mean"] = fallback
+    return summary
+
+
+def parse_train_metrics_specs(values: list[str]) -> dict[str, Path]:
+    paths: dict[str, Path] = {}
+    for value in values:
+        if "=" not in value:
+            raise SystemExit("--train-metrics entries must use STAGE=PATH")
+        stage, path = value.split("=", 1)
+        stage = stage.strip()
+        if not stage:
+            raise SystemExit("--train-metrics stage cannot be empty")
+        paths[stage] = Path(path)
+    return paths
+
+
+def infer_train_metrics_path(eval_path: Path, stage: str) -> Path | None:
+    for algo in ("grpo", "gspo", "ruler"):
+        prefix = f"{algo}_"
+        if stage.startswith(prefix):
+            suffix = stage.removeprefix(prefix)
+            candidate = eval_path.parent / f"train_metrics_{algo}_{suffix}.jsonl"
+            return candidate if candidate.exists() else None
+    return None
+
+
+def train_signal_quality(train_summary: dict[str, Any] | None, criteria: Criteria) -> dict[str, Any]:
+    if not train_summary:
+        return {"available": False, "decision": "unknown", "reason": "no train metrics provided"}
+
+    reward_range = numeric(train_summary, "data/train_reward_range_mean")
+    trainable_fraction = numeric(train_summary, "data/step_trainable_group_fraction")
+    positive_agentic = [
+        numeric(train_summary, "data/train_winner_minus_loser_outcome_success"),
+        numeric(train_summary, "data/train_winner_minus_loser_task_success"),
+        numeric(train_summary, "data/train_winner_minus_loser_state_action_sequence_match"),
+        numeric(train_summary, "data/train_winner_minus_loser_valid_state_action_rate"),
+    ]
+    error_agentic = [
+        numeric(train_summary, "data/train_winner_minus_loser_bad_state_action"),
+        numeric(train_summary, "data/train_winner_minus_loser_missing_state_action"),
+    ]
+    positive_best = max([value for value in positive_agentic if value is not None], default=None)
+    error_best = min([value for value in error_agentic if value is not None], default=None)
+    agentic_ok = gte(positive_best, criteria.rl_min_train_agentic_delta) or lte(
+        error_best, -criteria.rl_min_train_agentic_delta
+    )
+    reward_range_ok = gte(reward_range, criteria.rl_min_train_reward_range)
+    trainable_fraction_ok = trainable_fraction is None or gte(
+        trainable_fraction, criteria.rl_min_trainable_group_fraction
+    )
+    accepted = reward_range_ok and trainable_fraction_ok and agentic_ok
+    reasons: list[str] = []
+    if not reward_range_ok:
+        reasons.append("train reward range is too low")
+    if not trainable_fraction_ok:
+        reasons.append("too few sampled groups survived reward-signal filtering")
+    if not agentic_ok:
+        reasons.append("winner-minus-loser deltas do not show agentic train signal")
+    if accepted:
+        reasons.append("train groups contain usable agentic RL signal")
+    return {
+        "available": True,
+        "decision": "accept" if accepted else "reject",
+        "reason": "; ".join(reasons),
+        "path": train_summary.get("path"),
+        "reward_range_mean": reward_range,
+        "trainable_group_fraction": trainable_fraction,
+        "best_positive_agentic_delta": positive_best,
+        "best_error_reduction_delta": error_best,
+        "best_agentic_signal_delta": best_agentic_signal_delta(positive_best, error_best),
+    }
+
+
+def best_agentic_signal_delta(positive_best: float | None, error_best: float | None) -> float | None:
+    candidates: list[float] = []
+    if positive_best is not None:
+        candidates.append(positive_best)
+    if error_best is not None:
+        candidates.append(-error_best)
+    return max(candidates) if candidates else None
 
 
 def stage_success_map(path: Path, *, metric: str = "outcome_success") -> dict[str, bool]:
@@ -135,7 +275,7 @@ def judge_sft(summary: dict[str, Any], baseline: dict[str, Any], criteria: Crite
 
 
 def judge_rl(summary: dict[str, Any], sft: dict[str, Any], criteria: Criteria) -> dict[str, Any]:
-    return judge_rl_with_churn(summary, sft, criteria, churn=None)
+    return judge_rl_with_churn(summary, sft, criteria, churn=None, train_summary=None)
 
 
 def judge_rl_with_churn(
@@ -144,6 +284,7 @@ def judge_rl_with_churn(
     criteria: Criteria,
     *,
     churn: dict[str, Any] | None,
+    train_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     reward_delta = delta(summary, sft, "reward")
     outcome_delta = delta(summary, sft, "outcome_success")
@@ -166,7 +307,15 @@ def judge_rl_with_churn(
         or not (churn or {}).get("reference_successes")
         or gte(retention_rate, criteria.rl_min_retained_sft_outcome_success_rate)
     )
-    accepted = gte(reward_delta, criteria.rl_min_reward_delta) and performance_lift and error_lift and retention_ok
+    train_signal = train_signal_quality(train_summary, criteria)
+    train_signal_ok = train_signal["decision"] != "reject"
+    accepted = (
+        gte(reward_delta, criteria.rl_min_reward_delta)
+        and performance_lift
+        and error_lift
+        and retention_ok
+        and train_signal_ok
+    )
     reasons: list[str] = []
     if not gte(reward_delta, criteria.rl_min_reward_delta):
         reasons.append("reward did not clear the RL delta gate")
@@ -176,6 +325,8 @@ def judge_rl_with_churn(
         reasons.append("no bad-state or missing-state error reduction over SFT")
     if not retention_ok:
         reasons.append("RL churned away too many SFT outcome successes")
+    if not train_signal_ok:
+        reasons.append("train-time groups lacked meaningful agentic RL signal")
     if accepted:
         reasons.append("RL branch improves the SFT parent under the configured gate")
     return {
@@ -185,6 +336,7 @@ def judge_rl_with_churn(
         "reason": "; ".join(reasons),
         "deltas": {key: delta(summary, sft, key) for key in PRIMARY_KEYS},
         "outcome_success_churn": churn or {},
+        "train_signal": train_signal,
     }
 
 
@@ -206,11 +358,12 @@ def markdown_report(
         f"- RL must improve at least one of outcome, task, or state-action sequence metrics versus SFT.",
         f"- RL must reduce either bad-state or missing-state errors versus SFT.",
         f"- RL must retain at least `{criteria.rl_min_retained_sft_outcome_success_rate:.4f}` of deterministic SFT `outcome_success` wins when SFT has any wins.",
+        f"- When train metrics are available, RL must show mean train reward range of at least `{criteria.rl_min_train_reward_range:.4f}`, trainable group fraction of at least `{criteria.rl_min_trainable_group_fraction:.4f}`, and winner-minus-loser movement in an agentic metric of at least `{criteria.rl_min_train_agentic_delta:.4f}`.",
         "",
         "## Decisions",
         "",
-        "| stage | reference | decision | reason | delta_reward | delta_outcome | delta_task | delta_state_seq | delta_bad_state | delta_missing_state | retained_sft_wins | lost_sft_wins | new_wins | retention_rate |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| stage | reference | decision | reason | delta_reward | delta_outcome | delta_task | delta_state_seq | delta_bad_state | delta_missing_state | retained_sft_wins | lost_sft_wins | new_wins | retention_rate | train_reward_range | trainable_groups | train_agentic_delta |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for decision in decisions:
         deltas = decision["deltas"]
@@ -225,6 +378,10 @@ def markdown_report(
             if isinstance(value, float):
                 return f"{value:.4f}"
             return str(value)
+        train_signal = decision.get("train_signal") or {}
+        def signal_fmt(key: str) -> str:
+            value = train_signal.get(key)
+            return "" if value is None else f"{float(value):.4f}"
 
         lines.append(
             "| "
@@ -244,6 +401,9 @@ def markdown_report(
                     churn_fmt("lost_reference_successes"),
                     churn_fmt("new_successes"),
                     churn_fmt("retention_rate"),
+                    signal_fmt("reward_range_mean"),
+                    signal_fmt("trainable_group_fraction"),
+                    signal_fmt("best_agentic_signal_delta"),
                 ]
             )
             + " |"
@@ -295,6 +455,15 @@ def main() -> None:
     parser.add_argument("--rl-min-state-action-delta", type=float, default=0.05)
     parser.add_argument("--rl-min-error-reduction", type=float, default=0.05)
     parser.add_argument("--rl-min-retained-sft-outcome-success-rate", type=float, default=0.75)
+    parser.add_argument("--rl-min-train-reward-range", type=float, default=0.05)
+    parser.add_argument("--rl-min-trainable-group-fraction", type=float, default=0.25)
+    parser.add_argument("--rl-min-train-agentic-delta", type=float, default=0.01)
+    parser.add_argument(
+        "--train-metrics",
+        nargs="*",
+        default=[],
+        help="Optional STAGE=PATH entries for RL train_metrics JSONL files. Missing entries are auto-discovered from eval paths.",
+    )
     args = parser.parse_args()
 
     if len(args.stages) != len(args.paths):
@@ -308,6 +477,9 @@ def main() -> None:
         rl_min_state_action_delta=args.rl_min_state_action_delta,
         rl_min_error_reduction=args.rl_min_error_reduction,
         rl_min_retained_sft_outcome_success_rate=args.rl_min_retained_sft_outcome_success_rate,
+        rl_min_train_reward_range=args.rl_min_train_reward_range,
+        rl_min_trainable_group_fraction=args.rl_min_trainable_group_fraction,
+        rl_min_train_agentic_delta=args.rl_min_train_agentic_delta,
     )
     summaries = [
         summarize(Path(path), stage=stage, model=args.model)
@@ -323,6 +495,12 @@ def main() -> None:
 
     path_by_stage = {stage: Path(path) for path, stage in zip(args.paths, args.stages, strict=True)}
     sft_successes = stage_success_map(path_by_stage[args.sft_stage])
+    explicit_train_metric_paths = parse_train_metrics_specs(args.train_metrics)
+    train_summaries: dict[str, dict[str, Any]] = {}
+    for stage, eval_path in path_by_stage.items():
+        train_path = explicit_train_metric_paths.get(stage) or infer_train_metrics_path(eval_path, stage)
+        if train_path is not None and train_path.exists():
+            train_summaries[stage] = summarize_train_metrics(train_path, stage=stage)
 
     decisions = [judge_sft(sft, baseline, criteria)]
     for summary in summaries:
@@ -336,12 +514,14 @@ def main() -> None:
                 sft,
                 criteria,
                 churn=success_churn(stage_successes, sft_successes),
+                train_summary=train_summaries.get(stage),
             )
         )
 
     report = {
         "criteria": criteria.__dict__,
         "summaries": summaries,
+        "train_summaries": train_summaries,
         "decisions": decisions,
         "accepted": all(decision["decision"] == "accept" for decision in decisions),
     }

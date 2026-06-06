@@ -550,6 +550,96 @@ class RetailRewardInvariantTests(unittest.TestCase):
         self.assertEqual(churn["new_successes"], 2)
         self.assertEqual(churn["retention_rate"], 0.5)
 
+    def test_train_signal_quality_rejects_reward_only_rl_signal(self) -> None:
+        criteria = stage_acceptance.Criteria(
+            rl_min_train_reward_range=0.05,
+            rl_min_trainable_group_fraction=0.25,
+            rl_min_train_agentic_delta=0.01,
+        )
+        train_summary = {
+            "data/train_reward_range_mean": 0.25,
+            "data/step_trainable_group_fraction": 0.75,
+            "data/train_winner_minus_loser_outcome_success": 0.0,
+            "data/train_winner_minus_loser_task_success": 0.0,
+            "data/train_winner_minus_loser_state_action_sequence_match": 0.0,
+            "data/train_winner_minus_loser_valid_state_action_rate": 0.0,
+            "data/train_winner_minus_loser_bad_state_action": 0.0,
+            "data/train_winner_minus_loser_missing_state_action": 0.0,
+        }
+
+        decision = stage_acceptance.train_signal_quality(train_summary, criteria)
+
+        self.assertEqual(decision["decision"], "reject")
+        self.assertIn("agentic train signal", decision["reason"])
+
+    def test_train_signal_quality_accepts_state_action_error_reduction(self) -> None:
+        criteria = stage_acceptance.Criteria(
+            rl_min_train_reward_range=0.05,
+            rl_min_trainable_group_fraction=0.25,
+            rl_min_train_agentic_delta=0.01,
+        )
+        train_summary = {
+            "data/train_reward_range_mean": 0.25,
+            "data/step_trainable_group_fraction": 0.75,
+            "data/train_winner_minus_loser_bad_state_action": -0.20,
+            "data/train_winner_minus_loser_missing_state_action": 0.0,
+        }
+
+        decision = stage_acceptance.train_signal_quality(train_summary, criteria)
+
+        self.assertEqual(decision["decision"], "accept")
+        self.assertEqual(decision["best_agentic_signal_delta"], 0.20)
+
+    def test_rl_gate_rejects_eval_lift_without_train_agentic_signal(self) -> None:
+        criteria = stage_acceptance.Criteria(
+            rl_min_reward_delta=0.05,
+            rl_min_outcome_delta=0.05,
+            rl_min_task_delta=0.05,
+            rl_min_state_action_delta=0.05,
+            rl_min_error_reduction=0.05,
+            rl_min_train_reward_range=0.05,
+            rl_min_trainable_group_fraction=0.25,
+            rl_min_train_agentic_delta=0.01,
+        )
+        sft = {
+            "stage": "sft_anchor",
+            "reward": 0.0,
+            "outcome_success": 0.10,
+            "task_success": 0.10,
+            "state_action_sequence_match": 0.10,
+            "bad_state_action": 0.20,
+            "missing_state_action": 0.80,
+        }
+        rl = {
+            "stage": "grpo",
+            "reward": 0.20,
+            "outcome_success": 0.20,
+            "task_success": 0.10,
+            "state_action_sequence_match": 0.10,
+            "bad_state_action": 0.10,
+            "missing_state_action": 0.80,
+        }
+        train_summary = {
+            "data/train_reward_range_mean": 0.20,
+            "data/step_trainable_group_fraction": 0.75,
+            "data/train_winner_minus_loser_outcome_success": 0.0,
+            "data/train_winner_minus_loser_task_success": 0.0,
+            "data/train_winner_minus_loser_state_action_sequence_match": 0.0,
+            "data/train_winner_minus_loser_bad_state_action": 0.0,
+            "data/train_winner_minus_loser_missing_state_action": 0.0,
+        }
+
+        decision = stage_acceptance.judge_rl_with_churn(
+            rl,
+            sft,
+            criteria,
+            churn=None,
+            train_summary=train_summary,
+        )
+
+        self.assertEqual(decision["decision"], "reject")
+        self.assertIn("train-time groups", decision["reason"])
+
     def test_sample_return_tool_is_state_changing(self) -> None:
         scenario = scenario_from_record(sample_records()[1], split="validation", index=0)
         messages = [

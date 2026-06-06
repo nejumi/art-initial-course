@@ -142,6 +142,7 @@ The runbook writes `checkpoint_acceptance.md` and `checkpoint_acceptance.json` a
 - RL should improve at least one agentic metric (`outcome_success`, `task_success`, or `state_action_sequence_match`) by at least 0.05 versus SFT.
 - RL should reduce at least one state-action error metric (`bad_state_action` or `missing_state_action`) by at least 0.05 versus SFT.
 - RL should preserve at least 75% of deterministic SFT `outcome_success` wins when the SFT parent has any wins. This catches success churn: a branch that loses many SFT successes and merely finds different isolated wins is not yet a convincing workshop result, even if the average happens to move.
+- If train metrics are available, RL should also have non-trivial train-time signal: non-zero group reward range, a reasonable fraction of trainable groups after dynamic filtering, and winner-minus-loser movement in outcome, task, state-action correctness, valid state-action rate, or state-action error reduction.
 
 Rejecting a stage is a useful result. It means the class should inspect Weave traces, improve the warm start or curriculum, and rerun before presenting the table as expected workshop performance.
 
@@ -163,6 +164,8 @@ For tau-style outcome training, use `--continue-on-invalid` unless the lab is in
 `--continue-on-invalid` does not make state-changing actions permissive. Unknown tool names are always invalid. For tau-inspired profiles, the replay environment may return a recorded output for a single exact reference state-changing action that appears before its reference read-only path, then advance the replay cursor to the matching state-action turn. This aligns the proxy with tau-style outcome scoring while still rejecting wrong or repeated mutations. Set `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS=false` to restore the stricter replay-order behavior for ablations.
 
 Watch `data/step_reward_range_mean`, `data/step_outcome_success_mean`, `data/step_invalid_tool_call_mean`, `data/step_unknown_tool_call_mean`, `data/step_bad_state_action_mean`, `data/step_missing_state_action_mean`, `data/step_truncated_by_max_turn_mean`, and `data/step_num_groups_dropped_no_reward_signal` during RL. If many groups are dropped, the `data/dropped_*_group_rate` metrics show whether they were all-success, all-failure, truncated, invalid-tool, missing-state-action, or never-reached-state-action groups. A good workshop run should show non-zero group reward range and some successful outcomes during sampling before you trust validation improvements.
+
+The acceptance gate reads `train_metrics_<algo>_<suffix>.jsonl` when it is present next to the eval outputs. This keeps the final table honest: an RL branch that gets a lucky validation bump but trained mostly on reward-only noise is rejected until the reward design, sampling temperature, curriculum, or SFT parent is improved.
 
 The runbook also writes `train_metrics_<algo>_<suffix>.jsonl` for each RL branch. Use `course/02_weave_evals/select_checkpoint_candidate.py` to shortlist candidate steps for held-out eval when a long run peaks before the final checkpoint. Do not copy the best train-step row into the expected-results table; first fork or log that checkpoint, run fresh validation rollouts, and inspect Weave traces for the selected tasks.
 

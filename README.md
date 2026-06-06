@@ -218,12 +218,19 @@ Training scripts use W&B Artifacts and Weave Evaluations for lineage:
 When a long RL run peaks before the final step, log the stable intermediate checkpoint without moving the mutable `latest` alias:
 
 ```bash
+python course/02_weave_evals/select_checkpoint_candidate.py \
+  data/retail_bridge_state1/lfm25-8b-a1b-bridge-state1_runbook/train_metrics_grpo_bridge-s32-lr2e6.jsonl \
+  --metric data/step_reward_mean \
+  --output-md data/retail_bridge_state1/lfm25-8b-a1b-bridge-state1_runbook/grpo_checkpoint_candidates.md
+
 python course/07_models_registry_weave/log_checkpoint_artifact.py \
   --model-name retail-support-agent-lfm25-8b-a1b-bridge-state1-grpo-bridge-s32-lr2e6 \
   --stage grpo \
   --checkpoint-step 23 \
   --alias validation-candidate
 ```
+
+The candidate selector reads the per-step RL metrics JSONL written by the runbook. It is meant to shortlist checkpoints for fresh held-out rollout evaluation; it does not replace validation evals or Weave trace inspection.
 
 For a fresh rollout eval of that step on another GPU, first materialize it under a unique model name without starting LocalBackend/vLLM:
 

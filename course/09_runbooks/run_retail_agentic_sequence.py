@@ -444,6 +444,8 @@ def train_rl_branch(
         parent_artifact,
         "--gpu-cost-per-hour-usd",
         str(args.gpu_cost_per_hour_usd),
+        "--metrics-jsonl",
+        path_arg(report_dir / f"train_metrics_{algo}_{args.rl_suffix}.jsonl"),
     ]
     if algo == "ruler":
         command += [

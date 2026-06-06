@@ -13,6 +13,7 @@ from pathlib import Path
 from course.shared.art_compat import make_local_backend, make_trainable_model, register_trainable_model
 from course.shared.config import config_from_env
 from course.shared.data import load_cached_split, scenarios_from_records, write_sample_dataset
+from course.shared.metrics_io import append_step_metrics
 from course.shared.rewards import REWARD_PROFILES
 from course.shared.rl_sampling import reward_signal_metrics, split_reward_signal_groups
 from course.shared.rollout import rollout_retail
@@ -52,6 +53,7 @@ async def main_async() -> None:
     parser.add_argument("--checkpoint-artifact-name", default=None)
     parser.add_argument("--no-log-checkpoint-artifact", action="store_true")
     parser.add_argument("--reward-profile", choices=REWARD_PROFILES, default=None)
+    parser.add_argument("--metrics-jsonl", default=None, help="Optional local JSONL path for per-step train metrics.")
     args = parser.parse_args()
 
     if args.reward_profile:
@@ -161,6 +163,13 @@ async def main_async() -> None:
         if not groups:
             print("Skipping RULER-GRPO step because no sampled groups had reward variance.", dynamic_filter_metrics)
             await model.log(trajectories=None, metrics=dynamic_filter_metrics, step=last_step, split="train")
+            append_step_metrics(
+                args.metrics_jsonl,
+                step=last_step,
+                algorithm="ruler-grpo",
+                metrics=dynamic_filter_metrics,
+                skipped=True,
+            )
             continue
         result = await backend.train(model, groups, learning_rate=args.learning_rate)
         metrics = {
@@ -171,6 +180,7 @@ async def main_async() -> None:
         }
         await model.log(groups, metrics=metrics, step=result.step, split="train")
         last_step = result.step
+        append_step_metrics(args.metrics_jsonl, step=result.step, algorithm="ruler-grpo", metrics=metrics)
         print("step", result.step, metrics)
     if not args.no_log_checkpoint_artifact:
         log_checkpoint_artifact(

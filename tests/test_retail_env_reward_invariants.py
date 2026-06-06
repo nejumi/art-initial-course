@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from course.shared.config import RetailCourseConfig
 from course.shared.data import normalize_record, sample_records, scenario_from_record
+from course.shared.metrics_io import append_step_metrics
 from course.shared.rl_sampling import reward_signal_metrics
 from course.shared.retail_env import ReplayRetailEnv, is_state_changing_tool
 from course.shared.rewards import score_messages
@@ -25,6 +26,7 @@ areal_sft = importlib.import_module("course.03_sft_warmup.make_areal_retail_sft_
 success_trace_sft = importlib.import_module("course.03_sft_warmup.make_success_trace_retail_sft_jsonl")
 cached_weave_eval = importlib.import_module("course.02_weave_evals.evaluate_cached_checkpoint")
 stage_acceptance = importlib.import_module("course.02_weave_evals.check_stage_acceptance")
+checkpoint_candidate = importlib.import_module("course.02_weave_evals.select_checkpoint_candidate")
 fork_checkpoint = importlib.import_module("course.08_enterprise_ops.fork_checkpoint")
 
 
@@ -386,6 +388,40 @@ class RetailRewardInvariantTests(unittest.TestCase):
                     to_model="eval-model",
                     not_after_step=2,
                 )
+
+    def test_append_step_metrics_writes_json_safe_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "metrics.jsonl"
+
+            append_step_metrics(
+                path,
+                step=23,
+                algorithm="grpo",
+                metrics={"data/step_reward_mean": 0.5, "nan": float("nan")},
+                extra={"checkpoint": Path("checkpoints/0023")},
+            )
+
+            row = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(row["step"], 23)
+            self.assertEqual(row["algorithm"], "grpo")
+            self.assertEqual(row["metrics"]["data/step_reward_mean"], 0.5)
+            self.assertIsNone(row["metrics"]["nan"])
+            self.assertEqual(row["checkpoint"], "checkpoints/0023")
+
+    def test_select_checkpoint_candidate_ignores_skipped_rows(self) -> None:
+        rows = [
+            {"step": 21, "algorithm": "grpo", "skipped": False, "metrics": {"data/step_reward_mean": 0.1}},
+            {"step": 22, "algorithm": "grpo", "skipped": True, "metrics": {"data/step_reward_mean": 0.9}},
+            {"step": 23, "algorithm": "grpo", "skipped": False, "metrics": {"data/step_reward_mean": 0.4}},
+        ]
+
+        candidates = checkpoint_candidate.choose_candidates(
+            rows,
+            metric="data/step_reward_mean",
+            top_k=1,
+        )
+
+        self.assertEqual(candidates[0]["step"], 23)
 
     def test_stage_gate_rejects_rl_without_agentic_lift(self) -> None:
         criteria = stage_acceptance.Criteria()

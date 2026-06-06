@@ -157,6 +157,8 @@ For tau-style outcome training, use `--continue-on-invalid` unless the lab is in
 
 Watch `data/step_reward_range_mean`, `data/step_outcome_success_mean`, `data/step_invalid_tool_call_mean`, `data/step_unknown_tool_call_mean`, `data/step_bad_state_action_mean`, `data/step_missing_state_action_mean`, `data/step_truncated_by_max_turn_mean`, and `data/step_num_groups_dropped_no_reward_signal` during RL. If many groups are dropped, the `data/dropped_*_group_rate` metrics show whether they were all-success, all-failure, truncated, invalid-tool, missing-state-action, or never-reached-state-action groups. A good workshop run should show non-zero group reward range and some successful outcomes during sampling before you trust validation improvements.
 
+The runbook also writes `train_metrics_<algo>_<suffix>.jsonl` for each RL branch. Use `course/02_weave_evals/select_checkpoint_candidate.py` to shortlist candidate steps for held-out eval when a long run peaks before the final checkpoint. Do not copy the best train-step row into the expected-results table; first fork or log that checkpoint, run fresh validation rollouts, and inspect Weave traces for the selected tasks.
+
 Eval rows and Weave scorers also record `first_failure_turn`, `first_state_action_turn`, `first_expected_state_action_turn`, and `read_only_reference_mismatches_before_state_action`. These help separate "the model never reached the consequential action" from "the model reached the action but mutated the wrong state" and from "the model spent too many turns on recoverable read-only detours."
 
 Reward calibration worksheet:

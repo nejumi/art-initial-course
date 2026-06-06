@@ -45,6 +45,17 @@ Avoid these SFT anti-patterns:
 - Overfitting only the shortest or easiest successful traces; this can raise SFT eval while starving RL of useful error branches.
 - Promoting a checkpoint based only on loss. The acceptance gate must also inspect outcome, state-changing action correctness, missing/bad action rates, and Weave traces.
 
+Split and leakage hygiene:
+
+- Preserve source dataset, source task ID, trace ID, row index, reward, and filter flags in every generated SFT row.
+- Include generated summary JSON files in the W&B data artifact, not just the final mixed JSONL.
+- Audit overlap between mixed SFT source IDs and held-out eval/task IDs before presenting official tau2-style numbers.
+- Treat public teacher/success-trace mixtures as training-proxy material unless the held-out eval tasks are known not to have entered the teacher data.
+
+Optional RFT bridge:
+
+Some successful public recipes use a progressive `SFT -> RFT -> GRPO` path. In this framing, SFT teaches protocol/tool schema, RFT or rejection-filtered rollouts add higher-quality executable trajectories from the model family, and GRPO improves the reward-optimized policy. The course does not need a full RFT lab for the first workshop, but instructors should name it as the natural bridge when SFT is too weak and RL rollouts are mostly no-signal failures.
+
 ## Course Implementation
 
 The lightweight `ReplayRetailEnv` is intentionally smaller than the full tau2 runtime. It teaches ART trajectories, tool messages, W&B lineage, Weave traces, GRPO, GSPO, and RULER without requiring a full benchmark server.
@@ -148,8 +159,23 @@ Watch `data/step_reward_range_mean`, `data/step_outcome_success_mean`, `data/ste
 
 Eval rows and Weave scorers also record `first_failure_turn`, `first_state_action_turn`, `first_expected_state_action_turn`, and `read_only_reference_mismatches_before_state_action`. These help separate "the model never reached the consequential action" from "the model reached the action but mutated the wrong state" and from "the model spent too many turns on recoverable read-only detours."
 
+Reward calibration worksheet:
+
+1. Run the same SFT checkpoint with `tau_sparse` and `tau_irc` on the same train/eval slices.
+2. Compare winner-minus-loser gaps for outcome, task success, state-action sequence match, valid state action, communication, bad state action, missing state action, and truncation.
+3. Ablate read-only shaping separately from state-changing-action shaping.
+4. Keep a shaping term only if it separates successful from failed rollouts without rewarding irrelevant read-only lookup similarity.
+5. Validate on held-out rollouts before increasing RL steps. A higher train-step reward with flat validation outcome is a reward-design failure, not a course success.
+
 Long multi-turn retail traces can exceed the local ART packed sequence length. If the trainer warns that it is dropping tokenized trajectories over `packed_sequence_length`, either raise `ART_MAX_SEQ_LENGTH` on H100-class hardware or reduce `ART_ROLLOUT_MAX_COMPLETION_TOKENS` / `max_turns` for constrained GPUs. For final course results, prefer runs where only a small fraction of trajectories are dropped, because dropped trajectories weaken the W&B learning curves and can bias which successes the optimizer sees.
 
 The local `outcome_success` metric is a training proxy. Newer course outputs also log it as `proxy_outcome_success` to make that explicit. For a full benchmark-grade extension, replace `ReplayRetailEnv` with the official tau2 Gym / domain runtime and use DB + COMMUNICATE pass rate as the primary eval metric. Keep reference-action metrics as diagnostics only.
+
+For stochastic evaluation, distinguish workshop proxies from benchmark reporting:
+
+- Deterministic single rollout: fastest instructor check for regressions.
+- `pass@k`: useful diagnostic for whether a checkpoint ever solves a task under sampling.
+- `pass^k`: stricter reliability view for repeated trials; useful before claiming a support agent is dependable.
+- Official tau2 reporting: DB * COMMUNICATE under the official runtime, kept separate from replay-env proxy metrics.
 
 The optional bridge in `course/02_weave_evals/official_tau2_eval_bridge.md` keeps this separation clean: ART labs can run in the Python 3.11 training environment, while official tau2 scoring runs in a separate Python 3.12 environment and is imported back into W&B comparison tables with `import_tau2_results.py`.

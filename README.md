@@ -26,6 +26,8 @@ The course intentionally uses public datasets so a workshop can run end to end w
 
 Full-dialog SFT is easy to explain, but it can over-supervise long dialogue style and final responses. Next-action SFT is the stronger path when we want to align with modern agent training recipes and avoid training on every prior assistant action repeatedly.
 
+For workshop reporting, keep data lineage and split hygiene explicit. Every mixed SFT row carries source metadata, and data artifacts include generated summaries so instructors can check which source IDs entered training. Do not present official tau2 numbers for an eval task set that may overlap with public teacher or success-trace SFT rows; use those runs as training-proxy demos unless the held-out task IDs have been audited.
+
 ## Quick Start
 
 ```bash
@@ -68,6 +70,8 @@ python course/09_runbooks/run_retail_agentic_sequence.py \
   --data-artifact-name retail-course-data-bridge-state1 \
   --build-bridge \
   --sft-max-steps 96 \
+  --reward-profile tau_irc \
+  --continue-on-invalid \
   --rl-steps 32 \
   --rl-algos grpo,gspo
 ```
@@ -85,6 +89,8 @@ python course/09_runbooks/run_retail_agentic_sequence.py \
   --include-teacher-sft \
   --teacher-sft-limit 512 \
   --sft-max-steps 144 \
+  --reward-profile tau_irc \
+  --continue-on-invalid \
   --rl-steps 32 \
   --rl-algos grpo,gspo
 ```
@@ -106,6 +112,8 @@ python course/09_runbooks/run_retail_agentic_sequence.py \
   --include-success-trace-sft \
   --success-trace-sft-limit 512 \
   --sft-max-steps 240 \
+  --reward-profile tau_irc \
+  --continue-on-invalid \
   --rl-steps 48 \
   --rl-algos grpo,gspo,ruler
 ```
@@ -187,8 +195,12 @@ python course/04_grpo_local/train_grpo_local.py \
   --steps 8 \
   --groups-per-step 4 \
   --rollouts-per-scenario 4 \
+  --reward-profile tau_irc \
+  --continue-on-invalid \
   --learning-rate 5e-6
 ```
+
+`dense` is a replay-style teaching reward. Use `tau_irc` for the main agentic RL lab because it keeps verifiable outcome/state-changing-action signal as the anchor while treating read-only replay mismatches as diagnostics or small penalties.
 
 SFT is intentionally chunked: one ART SFT call produces one ART checkpoint/log point, so `--chunk-size-batches` keeps the SFT loss curve visible in W&B instead of collapsing a full epoch into a single point.
 

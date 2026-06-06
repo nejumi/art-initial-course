@@ -870,7 +870,7 @@ course/
 - `RetailScenario`, `RetailEnv`, `Trajectory`, `TrajectoryGroup` を作る
 - prompted baseline modelでdry-run rollout
 - `logprobs=True, top_logprobs=0` を要求
-- deterministic rewardを計算
+- `dense`, `tau_sparse`, `tau_irc` のreward profileを切り替えて、replay rewardとtau-style outcome proxyの違いを見る
 - `await model.log(groups, split="val")`
 
 期待成果:
@@ -904,18 +904,23 @@ course/
 目的:
 
 - SFTがRL前の形式学習として効くことを理解。
+- next-action SFTをデフォルトにし、full-dialog SFTは比較用baselineとして扱う。
 
 内容:
 
 - `lefft/tau-dev-task-retail-v1` のtrain splitからSFT JSONLを生成
 - `tools` 付きmulti-turn conversationを含め、OpenAI tool-calling wire formatを保持
-- `train_sft_from_file` をLocalBackendで実行
+- `make_next_action_sft_jsonl.py` でper-turn next-action rowsを生成
+- `train_sft_local.py --sft-mask-mode last-assistant` をLocalBackendで実行
+- public teacher / AReaL / success-trace rowsを混ぜる場合もsource metadataを保持してW&B Data Artifactへ入れる
 - W&Bにloss curveを出す
 
 注意:
 
 - SFT JSONLは最後のmessageがassistantである必要がある。
 - assistant response tokenのみloss対象で、system/userはmaskされる。
+- next-action rowsでは過去assistant turnsはcontextであり、loss対象は最後のassistant actionだけにする。
+- full-dialog SFTはtool schema/wire formatの説明には便利だが、RL parentとしては過去turnを過剰に模倣しやすい。
 
 期待成果:
 
@@ -931,7 +936,7 @@ course/
 内容:
 
 - 1 stepあたり `num_scenarios=8`, `rollouts_per_scenario=4 or 8`
-- deterministic rewardで学習
+- main pathは `--reward-profile tau_irc --continue-on-invalid` で学習
 - `backend.train(..., learning_rate=5e-6)` 実行
 - `model.log(..., split="train")`
 
@@ -947,7 +952,19 @@ course/
 
 - rewardが全部同じgroupはなぜ学習されないか
 - group sizeを4/8/16でどう選ぶか
-- exact rewardだけだと何を見落とすか
+- replay exact rewardだけだと何を見落とすか
+- `tau_sparse` と `tau_irc` を比較し、shapingがwinner-loser gapを本当に広げているかを見る
+
+Reward profile matrix:
+
+| Profile | Primary use | What it teaches | Caveat |
+| --- | --- | --- | --- |
+| `dense` | early mechanics | reference tool names, arguments, final text similarity | replay-style reward; do not present as tau2 score |
+| `strict_success` | failure demo | exact reference trajectory success/failure | too brittle for agentic RL |
+| `agentic` | transition profile | state-changing action and final communication diagnostics | still tied to replay data |
+| `tau_sparse` | tau-style baseline | sparse outcome / communication anchor | lower reward density |
+| `tau_irc` | main RL lab | calibrated outcome + state-action shaping | must be validated against held-out eval |
+| official tau2 `DB * COMMUNICATE` | benchmark-grade reporting | final DB hash and required communication | requires separate tau2 runtime |
 
 ### Lab 05 - RULER Hybrid Reward
 
@@ -960,7 +977,7 @@ course/
 - `ruler_score_group` を `after_each` で利用
 - custom rubricを作成
 - original rewardを `independent_reward` として保存
-- final rewardを `0.7 * ruler_score + 0.3 * exact_reward` にする変形も実装
+- judge scoreをauxiliary metric, tie-breaker, or risk demoとして扱う
 - judge costをART metricsで記録
 
 Weave:
@@ -973,6 +990,7 @@ Weave:
 
 - RULERは現時点で `additional_histories` を含むtrajectoryをサポートしない。
 - 開発初期は `debug=True` でjudge reasoningを確認する。
+- tau-style trainingではverifiable outcome/state-changing-action rewardをanchorにする。judge rewardでDB/COMMUNICATE相当の検証可能信号を置き換えない。
 
 ### Lab 06 - GSPO and Config Matrix
 

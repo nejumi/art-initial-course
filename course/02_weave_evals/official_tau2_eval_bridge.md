@@ -14,6 +14,10 @@ Official tau2 retail scoring uses the task `reward_basis`. For retail, airline, 
 
 The course proxy metrics such as `outcome_success`, `state_action_sequence_match`, and `communication_success` are useful training diagnostics. They should not be presented as official tau2 leaderboard scores.
 
+## Retail First, Telecom Later
+
+Retail is the right first hands-on task because the environment can be taught as a single-control support workflow: the agent reads state, performs one or more state-changing tools, and communicates the result. Telecom is a stronger research target but a heavier workshop topic because tau2 introduces a dual-control setup where both the agent and the user can act with tools in a shared dynamic environment. Do not generalize replay-retail action matching into a telecom reward design; telecom needs an explicit user simulator and coordination/communication analysis.
+
 ## Setup
 
 ```bash

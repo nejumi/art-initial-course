@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import argparse
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -75,33 +76,38 @@ async def main_async() -> None:
     groups = []
     rows = []
     rollouts_per_scenario = max(1, args.rollouts_per_scenario)
-    for scenario in scenarios:
-        trajectories = []
-        for rollout_index in range(rollouts_per_scenario):
-            traj = await rollout_retail(
-                model,
-                scenario,
-                split="val",
-                temperature=args.temperature,
-                max_completion_tokens=args.max_completion_tokens,
-                terminate_on_invalid=False if args.continue_on_invalid else None,
-                request_logprobs=not args.no_logprobs,
-            )
-            trajectories.append(traj)
-            row = {
-                "scenario_id": scenario.id,
-                "rollout_index": rollout_index,
-                "reward": traj.reward,
-                "metrics": traj.metrics,
-                "logs": traj.logs,
-            }
-            if args.include_messages:
-                row["messages"] = [choice_to_message(item) for item in traj.messages_and_choices]
-                row["expected_tool_names"] = scenario.expected_tool_names
-                row["expected_final_text"] = scenario.expected_final_text
-            rows.append(row)
-            print(scenario.id, rollout_index, traj.reward, traj.metrics)
-        groups.append(art.TrajectoryGroup(trajectories))
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as output_file:
+        for scenario in scenarios:
+            trajectories = []
+            for rollout_index in range(rollouts_per_scenario):
+                traj = await rollout_retail(
+                    model,
+                    scenario,
+                    split="val",
+                    temperature=args.temperature,
+                    max_completion_tokens=args.max_completion_tokens,
+                    terminate_on_invalid=False if args.continue_on_invalid else None,
+                    request_logprobs=not args.no_logprobs,
+                )
+                trajectories.append(traj)
+                row = {
+                    "scenario_id": scenario.id,
+                    "rollout_index": rollout_index,
+                    "reward": traj.reward,
+                    "metrics": traj.metrics,
+                    "logs": traj.logs,
+                }
+                if args.include_messages:
+                    row["messages"] = [choice_to_message(item) for item in traj.messages_and_choices]
+                    row["expected_tool_names"] = scenario.expected_tool_names
+                    row["expected_final_text"] = scenario.expected_final_text
+                rows.append(row)
+                output_file.write(json.dumps(row, ensure_ascii=False) + "\n")
+                output_file.flush()
+                print(scenario.id, rollout_index, traj.reward, traj.metrics)
+            groups.append(art.TrajectoryGroup(trajectories))
     await model.log(groups, split="val")
     write_jsonl(args.output, rows)
     print(f"Wrote {len(rows)} eval rows to {args.output}")

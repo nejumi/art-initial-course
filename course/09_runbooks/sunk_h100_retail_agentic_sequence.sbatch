@@ -37,6 +37,10 @@ INCLUDE_AREAL_SFT="${13:-false}"
 AREAL_SFT_LIMIT="${14:-512}"
 INCLUDE_SUCCESS_TRACE_SFT="${15:-false}"
 SUCCESS_TRACE_SFT_LIMIT="${16:-200}"
+RL_GROUPS_PER_STEP="${17:-4}"
+RL_ROLLOUTS_PER_SCENARIO="${18:-8}"
+RL_LEARNING_RATE="${19:-2e-6}"
+RL_SUFFIX="${20:-bridge-s32-lr2e6}"
 
 mkdir -p .art/sunk_runs/logs
 
@@ -50,6 +54,10 @@ echo "sft_max_steps=$SFT_MAX_STEPS"
 echo "rl_steps=$RL_STEPS"
 echo "rl_train_limit=$RL_TRAIN_LIMIT"
 echo "rl_algos=$RL_ALGOS"
+echo "rl_groups_per_step=$RL_GROUPS_PER_STEP"
+echo "rl_rollouts_per_scenario=$RL_ROLLOUTS_PER_SCENARIO"
+echo "rl_learning_rate=$RL_LEARNING_RATE"
+echo "rl_suffix=$RL_SUFFIX"
 echo "include_teacher_sft=$INCLUDE_TEACHER_SFT"
 echo "teacher_sft_limit=$TEACHER_SFT_LIMIT"
 echo "include_areal_sft=$INCLUDE_AREAL_SFT"
@@ -85,6 +93,10 @@ python -B course/09_runbooks/run_retail_agentic_sequence.py \
   --rl-steps "$RL_STEPS" \
   --rl-train-limit "$RL_TRAIN_LIMIT" \
   --rl-algos "$RL_ALGOS" \
+  --rl-groups-per-step "$RL_GROUPS_PER_STEP" \
+  --rl-rollouts-per-scenario "$RL_ROLLOUTS_PER_SCENARIO" \
+  --rl-learning-rate "$RL_LEARNING_RATE" \
+  --rl-suffix "$RL_SUFFIX" \
   "${TEACHER_ARGS[@]}" \
   "${AREAL_ARGS[@]}" \
   "${SUCCESS_TRACE_ARGS[@]}" \

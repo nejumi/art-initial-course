@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -44,6 +45,46 @@ def sha256_file(path: Path) -> str:
 def count_lines(path: Path) -> int:
     with path.open("rb") as handle:
         return sum(1 for _ in handle)
+
+
+def jsonl_metadata_counts(path: Path) -> dict[str, Any]:
+    sft_format_counts: dict[str, int] = {}
+    source_counts: dict[str, int] = {}
+    rows = 0
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            rows += 1
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            metadata = row.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                continue
+            if "sft_format" in metadata:
+                value = str(metadata.get("sft_format") or "unknown")
+                sft_format_counts[value] = sft_format_counts.get(value, 0) + 1
+            source = metadata.get("source_dataset") or metadata.get("source_repo") or metadata.get("source")
+            if source:
+                source_key = str(source)
+                source_counts[source_key] = source_counts.get(source_key, 0) + 1
+    return {
+        "rows": rows,
+        "sft_format_counts": sft_format_counts,
+        "source_counts": source_counts,
+    }
+
+
+def read_json_file(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return value if isinstance(value, dict) else {"value": value}
 
 
 def file_manifest(paths: Iterable[Path], *, root: Path | None = None) -> list[dict[str, Any]]:
@@ -220,22 +261,25 @@ def log_retail_data_artifact(
         data_dir / "train.jsonl",
         data_dir / "validation.jsonl",
         data_dir / "test.jsonl",
-        data_dir / "sft_train.jsonl",
     ]
+    sft_files = sorted(data_dir.glob("sft*.jsonl"))
+    files.extend(sft_files)
     existing = [path for path in files if path.exists()]
     if not existing:
         raise FileNotFoundError(f"No retail JSONL files found in: {data_dir}")
 
     safe_name = artifact_safe_name(artifact_name)
+    source_metadata = read_json_file(data_dir / "source_metadata.json")
     metadata = {
         "task": "retail-support-agent",
         "source_dataset": config.dataset_id,
         "data_dir": str(data_dir),
+        "source_metadata": source_metadata,
         "git_commit": current_git_commit(),
         "files": [
             {
                 **entry,
-                "rows": count_lines(data_dir / entry["path"]),
+                **jsonl_metadata_counts(data_dir / entry["path"]),
             }
             for entry in file_manifest(existing, root=data_dir)
         ],

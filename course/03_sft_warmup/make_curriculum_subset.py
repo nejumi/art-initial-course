@@ -57,20 +57,35 @@ def main() -> None:
     parser.add_argument("--max-tool-calls", type=int, default=5)
     parser.add_argument("--holdout-modulo", type=int, default=5)
     parser.add_argument("--holdout-remainder", type=int, default=0)
+    parser.add_argument(
+        "--test-remainder",
+        type=int,
+        default=None,
+        help="Hash bucket reserved for test. Defaults to the next bucket after validation.",
+    )
     parser.add_argument("--limit-train", type=int, default=None)
     parser.add_argument("--limit-validation", type=int, default=None)
+    parser.add_argument("--limit-test", type=int, default=None)
     args = parser.parse_args()
 
     if args.holdout_modulo <= 1:
         raise ValueError("--holdout-modulo must be greater than 1")
     if not 0 <= args.holdout_remainder < args.holdout_modulo:
         raise ValueError("--holdout-remainder must be in [0, holdout_modulo)")
+    test_remainder = args.test_remainder
+    if test_remainder is None:
+        test_remainder = (args.holdout_remainder + 1) % args.holdout_modulo
+    if not 0 <= test_remainder < args.holdout_modulo:
+        raise ValueError("--test-remainder must be in [0, holdout_modulo)")
+    if test_remainder == args.holdout_remainder:
+        raise ValueError("--test-remainder must differ from --holdout-remainder")
 
     records = load_cached_split(args.source_dir, args.source_split)
     filtered = [record for record in records if tool_call_count(record) <= args.max_tool_calls]
 
     train_rows: list[dict[str, Any]] = []
     validation_rows: list[dict[str, Any]] = []
+    test_rows: list[dict[str, Any]] = []
     for record in filtered:
         bucket = holdout_bucket(task_key(record), args.holdout_modulo)
         if bucket == args.holdout_remainder:
@@ -78,6 +93,15 @@ def main() -> None:
                 annotate(
                     record,
                     split="validation",
+                    max_tool_calls=args.max_tool_calls,
+                    holdout_modulo=args.holdout_modulo,
+                )
+            )
+        elif bucket == test_remainder:
+            test_rows.append(
+                annotate(
+                    record,
+                    split="test",
                     max_tool_calls=args.max_tool_calls,
                     holdout_modulo=args.holdout_modulo,
                 )
@@ -91,14 +115,16 @@ def main() -> None:
         train_rows = train_rows[: args.limit_train]
     if args.limit_validation is not None:
         validation_rows = validation_rows[: args.limit_validation]
+    if args.limit_test is not None:
+        test_rows = test_rows[: args.limit_test]
 
     output_dir = Path(args.output_dir)
     write_jsonl(output_dir / "train.jsonl", train_rows)
     write_jsonl(output_dir / "validation.jsonl", validation_rows)
-    write_jsonl(output_dir / "test.jsonl", validation_rows)
+    write_jsonl(output_dir / "test.jsonl", test_rows)
     write_sft_jsonl(train_rows, output_dir / "sft_train.jsonl")
     write_sft_jsonl(validation_rows, output_dir / "sft_validation.jsonl")
-    write_sft_jsonl(validation_rows, output_dir / "sft_test.jsonl")
+    write_sft_jsonl(test_rows, output_dir / "sft_test.jsonl")
 
     print(
         {
@@ -108,8 +134,10 @@ def main() -> None:
             "max_tool_calls": args.max_tool_calls,
             "holdout_modulo": args.holdout_modulo,
             "holdout_remainder": args.holdout_remainder,
+            "test_remainder": test_remainder,
             "train_rows": len(train_rows),
             "validation_rows": len(validation_rows),
+            "test_rows": len(test_rows),
         }
     )
 

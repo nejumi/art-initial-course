@@ -1,6 +1,7 @@
 # OpenPipe ART x W&B Models x Weave Training Course Blueprint
 
 作成日: 2026-05-29  
+最終更新: 2026-06-06
 想定: エンタープライズ利用者向け。ローカルGPU / Dedicated Cloud / Customer Managed (W&B公式名称では Self-Managed) を主軸にし、Multi-tenant SaaS と Serverless RL は比較・補足として扱う。
 
 ## 1. コースの北極星
@@ -82,33 +83,35 @@ API smoke test:
 モデル選択:
 
 - `ART_MODEL_PROFILE=tiny`: `Qwen/Qwen3-0.6B`。小さなGPUやCPU寄り環境でのsetup/SFT/RL smoke test用。性能改善の説得力ではなく、教材の操作手順を低コストに確認するためのプロファイル。
-- `ART_MODEL_PROFILE=standard`: `LiquidAI/LFM2.5-8B-A1B`。H100を想定したメインハンズオンの基準モデル。2026-06-06時点の実測では、SFTでtask success、GRPOでscalar rewardの改善を見せられる。
+- `ART_MODEL_PROFILE=standard`: `LiquidAI/LFM2.5-8B-A1B`。H100を想定したメインハンズオンの基準モデル。2026-06-06時点ではこのモデルを主候補として、next-action SFTとtau-style RLのフル検証を進めている。
 - `ART_MODEL_PROFILE=openpipe`: `OpenPipe/Qwen3-14B-Instruct`。OpenPipe/Qwen系の互換性比較やmanaged trainingの話題に使う。
 - `ART_MODEL_PROFILE=serverless`: `OpenPipe/Qwen3-14B-Instruct`。W&B Serverless RLの軽い比較デモ用。
 - `ART_MODEL_PROFILE=moe`: `Qwen/Qwen3-30B-A3B-Instruct-2507`。Serverless/Megatron/MoEの発展説明用。
 - `ART_BASE_MODEL` を指定した場合はprofileより優先され、参加者や講師が任意のHF/vLLM互換モデルへ差し替えられる。
 
-実測済みの教材ストーリー:
+検証中の教材ストーリー:
 
 - Baseline LFM2.5-8B-A1Bはretail tool callingをある程度こなせるため、初期モデルが完全に壊れているtoy exampleにならない。
-- SFT anchorはtask successを `0.1458 -> 0.2083` に改善し、tool orderとfinal text F1も改善する。
-- GRPO 8 stepsはscalar rewardを `0.5102 -> 0.5165` に改善し、task successもbaselineより高い状態を保つ。
-- GSPO 3 stepsはtask success改善を維持しつつtool orderが最も高く、GRPOとの比較題材になる。
-- RULER-GRPOはjudgeを報酬設計に混ぜる章として扱い、短いrunではGSPO/GRPOに近い挙動を見せる。
+- 古いstrict replayに近い報酬では、小さなscalar reward改善が見えてもagentic RLの教材としては不十分だった。最終版ではこの結果を「診断用の失敗例」として扱い、期待結果には使わない。
+- 現在の本線は、短いbridge curriculumで `next-action SFT -> GRPO branch / GSPO branch` を独立比較し、`tau_irc` 報酬、state-changing action correctness、communication success、proxy outcome success、official tau2 importを横持ち表で検証する流れ。
+- SFT checkpointはlossだけでは採用しない。baseline/SFT/RLを同じholdoutでWeave evalし、SFTが少なくともtool-call形式とstate-changing action指標を改善していることを確認してからRL parentにする。
+- RLは「エラーなく回る」では合格にしない。group内reward variance、winner-minus-loser差分、zero-variance group filter、state-action attempt/reached rate、bad/missing state-action rateをW&Bに出し、GRPO/GSPOが実際に学習信号を受けていることを確認する。
+- 最終的な期待結果表は、フル再実行後にW&B Artifacts/Weave tracesと紐づく横持ちテーブルへ差し替える。汚れた探索projectのログは研究記録として残し、共有用sample projectは別projectに再実行して作る。
 
 学習題材:
 
 - メイン題材は「Retail Customer Support Agent」
-- オープンデータ: `lefft/tau-dev-task-retail-v1` をSFT/形式理解に使い、tau-bench/tau2-bench retail tasksを評価/RL rolloutの環境に使う。
+- オープンデータ: `lefft/tau-dev-task-retail-v1` をSFT/形式理解に使い、tau-bench/tau2-bench retailの考え方を評価/RL rollout設計に使う。Advancedでは `inclusionAI/AReaL-tau2-data` をnext-action SFT/RLデータ設計の比較対象にする。
 - 入力: 顧客からの注文キャンセル、返品、交換、住所変更、注文状況確認、商品情報確認などの問い合わせ。
 - 出力: 顧客への自然文応答と、必要なOpenAI tool-calling形式の関数呼び出し。
 - ツール例: `get_user_details`, `get_order_details`, `modify_pending_order_address`, `cancel_pending_order`, `return_delivered_order`, `exchange_delivered_order`, `calculate`。
 - 報酬:
-  - task success / verifier success
-  - policy compliance
-  - correct tool choice and arguments
-  - invalid or forbidden mutation penalty
-  - unnecessary tool call / excessive turn penalty
+  - tau-style proxy outcome success
+  - state-changing action correctness and argument correctness
+  - communication success
+  - invalid/unknown tool call penalty
+  - bad or missing state-changing action penalty
+  - excessive turn / truncation penalty
   - RULERによる「顧客対応の自然さ」「ポリシー説明のよさ」「簡潔さ」
 
 この題材がよい理由:
@@ -116,7 +119,7 @@ API smoke test:
 - 実際に入手できるオープンデータがある。`lefft/tau-dev-task-retail-v1` はOpenAI tool-calling wire formatで915件、train/validation/test split付き。
 - Retailはsingle-controlなので、Telecomのようなuser-side state mutation/user simulator設計を初回ハンズオンに持ち込まずに済む。
 - tool call、multi-turn、policy compliance、verifiable reward、Weave Evals、W&B Models/Registryの意味が自然に出る。
-- SFTでtool-call形式を覚え、RLでタスク成功率やポリシー遵守を上げる流れが説明しやすい。
+- SFTでtool-call形式と次アクション分布を覚え、RLでstate-changing outcomeとcommunicationを改善する流れが説明しやすい。
 - Telecomは発展編として「production agentでは人間がtrajectoryに入るが、RLではuser simulator/environmentで近似する」話に回す。
 
 ## 4. 受講者ペルソナ

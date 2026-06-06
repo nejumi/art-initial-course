@@ -6,12 +6,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import argparse
 import asyncio
+import os
 from pathlib import Path
 from typing import Any
 
 from course.shared.art_compat import make_prompted_model
 from course.shared.config import config_from_env
 from course.shared.data import load_cached_split, scenarios_from_records, write_sample_dataset
+from course.shared.rewards import REWARD_PROFILES
 from course.shared.rollout import rollout_retail
 from course.shared.tracing import init_weave, weave_op
 from course.shared.schemas import RetailScenario
@@ -42,8 +44,11 @@ async def main_async() -> None:
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--weave-evaluation", action="store_true")
     parser.add_argument("--no-logprobs", action="store_true")
+    parser.add_argument("--reward-profile", choices=REWARD_PROFILES, default=None)
     args = parser.parse_args()
 
+    if args.reward_profile:
+        os.environ["RETAIL_REWARD_PROFILE"] = args.reward_profile
     cfg = config_from_env()
     data_dir = Path(args.data_dir)
     if not (data_dir / f"{args.split}.jsonl").exists():

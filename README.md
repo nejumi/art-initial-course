@@ -8,8 +8,21 @@ The main task is a Retail Customer Support Agent based on open retail tool-calli
 
 - `lefft/tau-dev-task-retail-v1` for SFT and workflow validation
 - tau-bench / tau2-bench retail concepts for rollout, reward, and eval design
+- optional tau2-style next-action SFT data from `inclusionAI/AReaL-tau2-data`
 
 The code is structured so the early labs can be inspected without a GPU. Local ART training labs require a CUDA-capable GPU and `openpipe-art[backend]`.
+
+## Open Training Data
+
+The course intentionally uses public datasets so a workshop can run end to end without private task data.
+
+| Dataset | Main use | Why it is useful | Course handling |
+| --- | --- | --- | --- |
+| [`lefft/tau-dev-task-retail-v1`](https://huggingface.co/datasets/lefft/tau-dev-task-retail-v1) | Default SFT and evaluation data | Successful retail trajectories already serialized in OpenAI tool-call format | Downloaded by `download_tau_retail.py`; converted to `sft_*.jsonl` |
+| [`inclusionAI/AReaL-tau2-data`](https://huggingface.co/datasets/inclusionAI/AReaL-tau2-data) | Advanced next-action SFT option | Mirrors recent tau2-style SFT + verifiable-reward RL workflows | Converted by `make_areal_retail_sft_jsonl.py`; strips thinking fields and normalizes tool calls |
+| [`amityco/tau-bench-retail-train-next-action-all-step-score-v0.2`](https://huggingface.co/datasets/amityco/tau-bench-retail-train-next-action-all-step-score-v0.2) | Reference for step-level teacher data | Shows next-action candidates and scores for retail tool-calling | Used as design reference, not the default training source |
+
+Full-dialog SFT is easy to explain, but it can over-supervise long dialogue style and final responses. Next-action SFT is the stronger path when we want to align with modern agent training recipes and avoid training on every prior assistant action repeatedly.
 
 ## Quick Start
 
@@ -24,7 +37,69 @@ python course/00_setup/env_check.py
 python course/00_setup/art_api_smoke.py
 python course/03_sft_warmup/download_tau_retail.py --sample-if-download-fails
 python course/03_sft_warmup/make_sft_jsonl.py --limit 200
+python course/03_sft_warmup/make_next_action_sft_jsonl.py --data-dir data/retail
 python course/01_art_primitives/dry_run_rollout.py --limit 3
+```
+
+Bridge curriculum option for a shorter first RL lab:
+
+```bash
+python course/03_sft_warmup/make_bridge_curriculum.py \
+  --source-dir data/retail \
+  --output-dir data/retail_bridge_state1 \
+  --max-state-actions 1 \
+  --max-tool-calls 6 \
+  --max-turns 28
+python course/07_models_registry_weave/log_data_artifacts.py \
+  --data-dir data/retail_bridge_state1 \
+  --artifact-name retail-course-data-bridge-state1
+```
+
+Instructor runbook for a full local-H100 validation pass:
+
+```bash
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-slug lfm25-8b-a1b-bridge-state1 \
+  --base-model LiquidAI/LFM2.5-8B-A1B \
+  --data-dir data/retail_bridge_state1 \
+  --source-dir data/retail \
+  --data-artifact-name retail-course-data-bridge-state1 \
+  --build-bridge \
+  --sft-max-steps 96 \
+  --rl-steps 32 \
+  --rl-algos grpo,gspo
+```
+
+The runbook defaults to `--continue-on-invalid` for tau-style RL. Unexpected state-changing actions are still penalized, but rollouts continue long enough for final state/action and communication rewards to be observed. Use `--no-continue-on-invalid` only when demonstrating strict replay failure modes.
+For the final course report, add stochastic validation with `--eval-rollouts-per-scenario 4 --eval-temperature 0.2` so `outcome_pass_at_k`, `task_pass_at_k`, and reward variance columns are meaningful. Keep the default deterministic eval for quick instructor checks.
+
+On a Slurm H100 cluster, the same flow can be launched with:
+
+```bash
+sbatch course/09_runbooks/sunk_h100_retail_agentic_sequence.sbatch
+```
+
+Advanced SFT data option:
+
+```bash
+python course/03_sft_warmup/make_areal_retail_sft_jsonl.py \
+  --tools-data-dir data/retail \
+  --output data/retail/sft_areal_retail_next_action.jsonl \
+  --limit 200
+```
+
+The default course path uses compact TAU retail trajectories. The bridge curriculum keeps short successful trajectories with exactly one state-changing action, which is useful for proving that agentic RL can improve a verifiable outcome before moving to the broader retail curriculum. The AReaL converter is provided for advanced experiments that want to align SFT data construction with recent tau2-style multi-turn tool-agent work.
+
+Next-action SFT should be trained with last-assistant masking:
+
+```bash
+python course/03_sft_warmup/train_sft_local.py \
+  --file data/retail/sft_train_next_action.jsonl \
+  --sft-mask-mode last-assistant \
+  --batch-size 1 \
+  --peak-lr 1e-5 \
+  --max-steps 48 \
+  --chunk-size-batches 12
 ```
 
 To run ART training, configure W&B and a local GPU environment:
@@ -55,12 +130,19 @@ python course/04_grpo_local/train_grpo_local.py \
 
 SFT is intentionally chunked: one ART SFT call produces one ART checkpoint/log point, so `--chunk-size-batches` keeps the SFT loss curve visible in W&B instead of collapsing a full epoch into a single point.
 
+SFT also runs a tokenization preflight. By default, rows that exceed `ART_MAX_SEQ_LENGTH` are filtered before training so the loss curve does not contain zero-loss batches from examples that ART drops internally. Use `--keep-overlength-sft-rows` only when you explicitly want to inspect ART's raw drop behavior.
+
 Training scripts use W&B Artifacts for lineage:
 
 - `retail-course-data:latest` contains the TAU Retail JSONL splits plus generated `sft_train.jsonl`.
-- SFT logs the latest local ART LoRA checkpoint as `<ART_MODEL_NAME>-checkpoint:sft-anchor`.
+- Data artifacts include all `sft*.jsonl` files in the data directory, so full-trajectory, next-action, and AReaL-derived SFT variants can be traced.
+- SFT logs the latest local ART LoRA checkpoint as `<ART_MODEL_NAME>-checkpoint:sft-anchor`, including the exact `sft_file` and `sft_mask_mode` in checkpoint metadata.
 - GRPO, GSPO, and RULER runs call `use_artifact` on the SFT checkpoint and log their own branch checkpoint artifacts.
 - Eval runs can call `use_artifact` on both the dataset and the evaluated checkpoint, while Weave stores rollout traces.
+
+Reward and SFT data design notes: [course/04_grpo_local/reward_and_sft_design_notes.md](course/04_grpo_local/reward_and_sft_design_notes.md).
+
+Official tau2 evaluation bridge: [course/02_weave_evals/official_tau2_eval_bridge.md](course/02_weave_evals/official_tau2_eval_bridge.md). Use this when you need benchmark-grade `DB * COMMUNICATE` scores in addition to the lightweight training proxy.
 
 ## Model Selection
 
@@ -90,9 +172,9 @@ When `ART_BASE_MODEL` points at an LFM2/LFM2.5 model, the course selects `ART_TO
 
 RULER judge selection is separate from the trainable model. It defaults to `openai/gpt-5.5` with medium reasoning effort in `course/05_ruler/train_with_ruler.py`.
 
-## Validated H100 Results
+## Diagnostic H100 Results
 
-The current reference run uses `LiquidAI/LFM2.5-8B-A1B`, `ART_MAX_SEQ_LENGTH=8192`, `ART_VLLM_MAX_MODEL_LEN=16384`, and 48 held-out retail eval scenarios. These are empirical workshop baselines, not a claim that every metric improves monotonically.
+The table below is retained as an older diagnostic run with strict reference-trajectory scoring. It is not the final expected-results table for the workshop. The course is being refreshed around tau-style outcome metrics (`tau_sparse` / `tau_irc`), where `proxy_outcome_success`, state-changing action correctness, and communication success are the primary training-proxy comparison columns. Official tau2 reporting should use `tau2_official_reward`, `tau2_db_success`, and `tau2_communicate_success` imported from the official runtime.
 
 | Stage | Reward | Task success | Tool F1 | Tool order | Invalid calls avg | Final text F1 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -102,15 +184,11 @@ The current reference run uses `LiquidAI/LFM2.5-8B-A1B`, `ART_MAX_SEQ_LENGTH=819
 | SFT -> GSPO, 3 steps | 0.5043 | 0.2083 | 0.7268 | 0.5792 | 0.7292 | 0.2405 |
 | SFT -> RULER-GRPO, 3 steps | 0.5026 | 0.1875 | 0.7254 | 0.5750 | 0.7292 | 0.2405 |
 
-The useful teaching arc is:
-
-- Baseline LFM2.5 is already capable, which makes the lab realistic rather than toy-like.
-- SFT improves exact task success, tool order, and final response overlap, but slightly lowers the scalar reward because invalid tool calls increase on this small eval slice.
-- GRPO recovers and exceeds baseline scalar reward while keeping task success above baseline.
-- GSPO is useful for contrasting sequence-level importance weighting; in the short run it preserves the SFT task-success gain and gives the best tool-order score.
-- RULER shows how to blend a model judge with deterministic retail reward signals.
+Current tau-style diagnostics show that naive full-trajectory SFT on the small curriculum slice does not reliably beat the baseline. The course therefore treats full-trajectory SFT as a teaching baseline and validates next-action SFT before using an SFT checkpoint as the parent for GRPO/GSPO/RULER.
 
 W&B Artifacts are logged for the dataset, the SFT checkpoint, and each RL branch checkpoint. The comparison script logs a horizontal W&B table with columns such as `model`, `stage`, `model_artifact_path`, `reward`, `task_success`, and delta metrics, while Weave stores rollout and eval traces.
+RL training logs also include signal-quality diagnostics: reward range/std before and after zero-variance filtering, winner-minus-loser gaps for outcome/state-action metrics, state-action attempt/reached rates, and tau-style reward components. These columns are meant to prove that GRPO/GSPO is optimizing agentic behavior rather than noise from read-only replay differences.
+The runbook writes both full audit tables (`checkpoint_eval_comparison.md/.csv`) and compact presentation tables (`checkpoint_eval_summary.md/.csv`).
 
 ## Lab Map
 

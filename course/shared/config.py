@@ -29,6 +29,11 @@ DEFAULT_VLLM_MAX_MODEL_LEN = 16384
 DEFAULT_VLLM_GPU_MEMORY_UTILIZATION = 0.70
 DEFAULT_VLLM_MAX_NUM_BATCHED_TOKENS = 16384
 DEFAULT_VLLM_MAX_NUM_SEQS = 8
+DEFAULT_RETAIL_TOOL_USE_INSTRUCTION = (
+    "When a tool is needed, emit exactly one tool call and no assistant text. "
+    "Do not write <think> tags or hidden reasoning in assistant messages. "
+    "After all required tool work is complete, answer the customer briefly."
+)
 
 MODEL_PROFILES: dict[str, str] = {
     "tiny": "Qwen/Qwen3-0.6B",
@@ -100,6 +105,24 @@ def optional_float_env(name: str) -> float | None:
     return float(value)
 
 
+def terminate_on_invalid_from_env() -> bool:
+    explicit = optional_bool_env("RETAIL_TERMINATE_ON_INVALID")
+    if explicit is not None:
+        return explicit
+    legacy = optional_bool_env("RETAIL_TERMINATE_ON_INVALID_TOOL")
+    if legacy is not None:
+        return legacy
+    return True
+
+
+def retail_tool_use_instruction_from_env() -> str:
+    return os.getenv("RETAIL_TOOL_USE_INSTRUCTION", DEFAULT_RETAIL_TOOL_USE_INSTRUCTION).strip()
+
+
+def strict_tool_prompt_from_env() -> bool:
+    return bool_env("RETAIL_STRICT_TOOL_PROMPT", True)
+
+
 def default_tool_call_parser(base_model: str | None = None) -> str | None:
     explicit = os.getenv("ART_TOOL_CALL_PARSER")
     if explicit is not None:
@@ -146,6 +169,7 @@ class RetailCourseConfig:
     vllm_max_num_batched_tokens: int | None = field(default_factory=lambda: optional_int_env("ART_VLLM_MAX_NUM_BATCHED_TOKENS") or DEFAULT_VLLM_MAX_NUM_BATCHED_TOKENS)
     vllm_max_num_seqs: int | None = field(default_factory=lambda: optional_int_env("ART_VLLM_MAX_NUM_SEQS") or DEFAULT_VLLM_MAX_NUM_SEQS)
     vllm_enforce_eager: bool | None = field(default_factory=lambda: optional_bool_env("ART_VLLM_ENFORCE_EAGER"))
+    terminate_on_invalid: bool = field(default_factory=terminate_on_invalid_from_env)
 
 
 def config_from_env() -> RetailCourseConfig:

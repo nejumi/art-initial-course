@@ -1,0 +1,203 @@
+from __future__ import annotations
+
+import json
+import importlib
+from pathlib import Path
+import sys
+import unittest
+from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from course.shared.data import normalize_record, sample_records, scenario_from_record
+from course.shared.rl_sampling import reward_signal_metrics
+from course.shared.retail_env import ReplayRetailEnv, is_state_changing_tool
+from course.shared.rewards import score_messages
+
+record_to_next_action_examples = importlib.import_module(
+    "course.03_sft_warmup.make_next_action_sft_jsonl"
+).record_to_next_action_examples
+
+
+def assistant_tool_call(name: str, arguments: dict[str, object]) -> dict[str, object]:
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_test",
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(arguments)},
+            }
+        ],
+    }
+
+
+class RetailRewardInvariantTests(unittest.TestCase):
+    def test_normalize_record_prefers_stable_record_id(self) -> None:
+        row = {
+            "id": "37",
+            "messages": [],
+            "metadata": {"record_id": "retail-sonnet35-37-4", "task_id": 37, "trial": 4},
+        }
+
+        normalized = normalize_record(row, split="train", index=0)
+
+        self.assertEqual(normalized["id"], "retail-sonnet35-37-4")
+
+    def test_next_action_merges_consecutive_assistant_chunks(self) -> None:
+        record = sample_records()[0]
+
+        examples = record_to_next_action_examples(record)
+
+        self.assertEqual(len(examples), 3)
+        state_action = examples[1]["messages"][-1]
+        self.assertEqual(state_action["role"], "assistant")
+        self.assertEqual(state_action["content"], "")
+        self.assertEqual(
+            state_action["tool_calls"][0]["function"]["name"],
+            "cancel_pending_order",
+        )
+
+    def test_sample_return_tool_is_state_changing(self) -> None:
+        scenario = scenario_from_record(sample_records()[1], split="validation", index=0)
+        messages = [
+            {"role": "system", "content": scenario.system_message},
+            {"role": "user", "content": scenario.user_message},
+            {"role": "assistant", "content": scenario.expected_final_text},
+        ]
+
+        result = score_messages(messages, scenario, reward_profile="tau_sparse")
+
+        self.assertTrue(is_state_changing_tool("return_delivered_order"))
+        self.assertEqual(result.metrics["outcome_success"], 0.0)
+        self.assertEqual(result.reward, 0.0)
+
+    def test_tau_mode_does_not_replay_out_of_order_state_action(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+        env = ReplayRetailEnv(scenario, terminate_on_invalid=False, strict_reference_actions=False)
+        step = env.step(assistant_tool_call("cancel_pending_order", {"order_id": "O-1001"}))
+
+        self.assertEqual(step.invalid_tool_calls, 1)
+        self.assertEqual(step.invalid_state_mutations, 1)
+        self.assertEqual(step.bad_state_actions, 1)
+        self.assertIn("unexpected_state_action", step.tool_messages[0]["content"])
+
+    def test_unknown_tool_is_invalid_even_in_tau_mode(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+        env = ReplayRetailEnv(scenario, terminate_on_invalid=False, strict_reference_actions=False)
+        step = env.step(assistant_tool_call("delete_customer_account", {"user_id": "U-1"}))
+
+        self.assertEqual(step.invalid_tool_calls, 1)
+        self.assertEqual(step.unknown_tool_calls, 1)
+        self.assertIn("unknown_tool_call", step.tool_messages[0]["content"])
+
+    def test_tau_irc_penalizes_bad_state_action_metric_directly(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+
+        base = score_messages(
+            scenario.reference_messages,
+            scenario,
+            invalid_state_mutations=1,
+            reward_profile="tau_irc",
+        )
+        with_bad_state = score_messages(
+            scenario.reference_messages,
+            scenario,
+            invalid_state_mutations=1,
+            bad_state_actions=1,
+            reward_profile="tau_irc",
+        )
+
+        self.assertLess(with_bad_state.reward, base.reward)
+
+    def test_tau_irc_exposes_state_action_diagnostics(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+
+        result = score_messages(scenario.reference_messages, scenario, reward_profile="tau_irc")
+
+        self.assertEqual(result.metrics["outcome_success"], 1.0)
+        self.assertGreater(result.metrics["state_action_expected_count"], 0.0)
+        self.assertEqual(result.metrics["state_action_attempt_rate"], 1.0)
+        self.assertEqual(result.metrics["valid_state_action_rate"], 1.0)
+        self.assertIn("reward_component/outcome", result.metrics)
+        self.assertIn("reward_component/penalty_bad_state", result.metrics)
+
+    def test_truncated_full_reference_is_not_tau_success(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+
+        complete = score_messages(scenario.reference_messages, scenario, reward_profile="tau_sparse")
+        truncated = score_messages(
+            scenario.reference_messages,
+            scenario,
+            truncated_by_max_turn=True,
+            reward_profile="tau_sparse",
+        )
+
+        self.assertEqual(complete.metrics["outcome_success"], 1.0)
+        self.assertEqual(truncated.metrics["outcome_success"], 0.0)
+        self.assertEqual(truncated.reward, 0.0)
+
+    def test_extra_read_only_lookup_does_not_make_state_action_missing(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+        messages = list(scenario.reference_messages)
+        extra_read = [
+            assistant_tool_call("get_order_details", {"order_id": "O-1001"}),
+            {"role": "tool", "tool_call_id": "call_test", "content": "{\"order_id\": \"O-1001\", \"status\": \"pending\"}"},
+        ]
+        messages = messages[:4] + extra_read + messages[4:]
+
+        result = score_messages(messages, scenario, read_only_reference_mismatches=1, reward_profile="tau_irc")
+
+        self.assertEqual(result.metrics["task_success"], 0.0)
+        self.assertEqual(result.metrics["outcome_success"], 1.0)
+        self.assertEqual(result.metrics["missing_state_action"], 0.0)
+
+    def test_terminal_tool_call_does_not_inherit_previous_assistant_text(self) -> None:
+        record = dict(sample_records()[0])
+        record["messages"] = list(record["messages"][:-1])
+        scenario = scenario_from_record(record, split="train", index=0)
+
+        result = score_messages(scenario.reference_messages, scenario, reward_profile="tau_sparse")
+
+        self.assertEqual(scenario.expected_final_text, "")
+        self.assertEqual(result.metrics["communication_success"], 1.0)
+        self.assertEqual(result.metrics["outcome_success"], 1.0)
+
+    def test_reward_signal_metrics_include_winner_loser_diagnostics(self) -> None:
+        group = SimpleNamespace(
+            trajectories=[
+                SimpleNamespace(
+                    reward=-0.2,
+                    metrics={
+                        "outcome_success": 0.0,
+                        "task_success": 0.0,
+                        "state_action_sequence_match": 0.0,
+                        "bad_state_action": 1.0,
+                        "missing_state_action": 1.0,
+                        "truncated_by_max_turn": 0.0,
+                    },
+                ),
+                SimpleNamespace(
+                    reward=1.0,
+                    metrics={
+                        "outcome_success": 1.0,
+                        "task_success": 1.0,
+                        "state_action_sequence_match": 1.0,
+                        "bad_state_action": 0.0,
+                        "missing_state_action": 0.0,
+                        "truncated_by_max_turn": 0.0,
+                    },
+                ),
+            ]
+        )
+
+        metrics = reward_signal_metrics([group], prefix="data/test")
+
+        self.assertEqual(metrics["data/test_outcome_success_mixed_group_rate"], 1.0)
+        self.assertEqual(metrics["data/test_winner_minus_loser_outcome_success"], 1.0)
+        self.assertEqual(metrics["data/test_winner_minus_loser_bad_state_action"], -1.0)
+
+
+if __name__ == "__main__":
+    unittest.main()

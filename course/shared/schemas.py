@@ -31,6 +31,13 @@ class EnvStep:
     user_messages: list[Message] = field(default_factory=list)
     done: bool = False
     invalid_tool_calls: int = 0
+    invalid_state_mutations: int = 0
+    read_only_reference_mismatches: int = 0
+    unknown_tool_calls: int = 0
+    bad_read_only_calls: int = 0
+    bad_state_actions: int = 0
+    missing_state_actions: int = 0
+    terminated_on_invalid: bool = False
     expected_tool_names: list[str] = field(default_factory=list)
     actual_tool_names: list[str] = field(default_factory=list)
 

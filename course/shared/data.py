@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import copy
 import json
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Iterable
 
-from .config import DEFAULT_DATASET_ID, ensure_data_dir
-from .retail_env import extract_tool_names_from_messages, first_message_content
+from .config import DEFAULT_DATASET_ID, ensure_data_dir, retail_tool_use_instruction_from_env, strict_tool_prompt_from_env
+from .retail_env import extract_tool_names_from_messages, first_message_content, parse_reference_turns
 from .schemas import RetailScenario
 
 SPLITS = ("train", "validation", "test")
@@ -46,8 +47,47 @@ def normalize_record(row: dict[str, Any], *, split: str | None = None, index: in
             metadata = json.loads(metadata)
         except json.JSONDecodeError:
             metadata = {"raw_metadata": metadata}
-    record_id = row.get("id") or metadata.get("id") or metadata.get("task_id") or f"{split or 'row'}-{index or 0}"
+    record_id = (
+        metadata.get("record_id")
+        or metadata.get("id")
+        or row.get("record_id")
+        or row.get("id")
+        or (
+            f"{metadata.get('task_id')}-{metadata.get('trial')}"
+            if metadata.get("task_id") is not None and metadata.get("trial") is not None
+            else None
+        )
+        or metadata.get("task_id")
+        or f"{split or 'row'}-{index or 0}"
+    )
     return {"id": str(record_id), "messages": list(messages), "tools": list(tools), "metadata": dict(metadata), "split": split or row.get("split")}
+
+
+def augment_system_message(content: str) -> str:
+    instruction = retail_tool_use_instruction_from_env()
+    if not instruction or not strict_tool_prompt_from_env():
+        return content
+    if instruction in content:
+        return content
+    return f"{content.rstrip()}\n\n{instruction}"
+
+
+def normalize_messages_for_sft(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize demonstrations so tool actions are learned as tool-only turns."""
+    normalized = copy.deepcopy(messages)
+    for message in normalized:
+        role = message.get("role")
+        if role == "system":
+            message["content"] = augment_system_message(str(message.get("content") or ""))
+            continue
+        if role != "assistant":
+            continue
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list) and tool_calls:
+            message["content"] = ""
+        elif message.get("content") is None:
+            message["content"] = ""
+    return normalized
 
 
 def load_cached_split(data_dir: str | Path, split: str, *, limit: int | None = None) -> list[dict[str, Any]]:
@@ -139,7 +179,19 @@ def load_split(
 
 
 def record_to_sft_example(record: dict[str, Any]) -> dict[str, Any]:
-    example = {"messages": record["messages"]}
+    meta = dict(record.get("metadata") or {})
+    example = {
+        "messages": normalize_messages_for_sft(record["messages"]),
+        "metadata": {
+            "source_record_id": meta.get("record_id") or record.get("id"),
+            "source_task_id": meta.get("task_id"),
+            "source_trial": meta.get("trial"),
+            "source_split": record.get("split"),
+            "source_dataset": meta.get("source_repo") or meta.get("source"),
+            "source_reward": meta.get("reward"),
+            "sft_format": "tau-retail-full-trajectory",
+        },
+    }
     if record.get("tools"):
         example["tools"] = record["tools"]
     return example
@@ -160,6 +212,10 @@ def scenario_from_record(record: dict[str, Any], *, split: str | None = None, in
         if msg.get("role") == "assistant" and msg.get("content"):
             expected_final_text = str(msg.get("content") or "")
             break
+        if msg.get("role") == "assistant":
+            break
+    reference_turns = parse_reference_turns(messages)
+    max_turns = max(8, len(reference_turns) + 2)
     return RetailScenario(
         id=normalized["id"],
         split=split or normalized.get("split") or "train",
@@ -170,6 +226,7 @@ def scenario_from_record(record: dict[str, Any], *, split: str | None = None, in
         expected_tool_names=expected_tool_names,
         expected_final_text=expected_final_text,
         metadata=normalized["metadata"],
+        max_turns=max_turns,
     )
 
 

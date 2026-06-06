@@ -54,6 +54,30 @@ Caveats:
 - it is not the right mode for asynchronous pipeline training;
 - it is the right default for the course's first Retail labs.
 
+For a real workshop environment, verify the rollout-to-train handoff before the
+full lab. The health probe uses a separate model name by default, runs a tiny
+rollout, optionally forces a non-zero reward gap, and prints GPU memory plus the
+vLLM sleep state if the installed ART version exposes it:
+
+```bash
+python course/08_enterprise_ops/localbackend_health_probe.py \
+  --data-dir data/retail_bridge_state1 \
+  --split train \
+  --rollouts 2 \
+  --max-turns 8 \
+  --max-completion-tokens 256
+```
+
+If this probe shows that vLLM is not sleeping around training, or GPU memory
+does not drop enough for the trainer, reduce vLLM memory settings first:
+
+```bash
+export ART_VLLM_GPU_MEMORY_UTILIZATION=0.70
+export ART_VLLM_MAX_MODEL_LEN=16384
+export ART_VLLM_MAX_NUM_BATCHED_TOKENS=16384
+export ART_VLLM_MAX_NUM_SEQS=8
+```
+
 ## LocalBackend Dedicated Mode
 
 Dedicated mode separates training GPUs from vLLM inference GPUs.

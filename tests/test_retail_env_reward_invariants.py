@@ -489,9 +489,30 @@ class RetailRewardInvariantTests(unittest.TestCase):
         self.assertEqual(result.metrics["outcome_success"], 0.0)
         self.assertEqual(result.reward, 0.0)
 
-    def test_tau_mode_does_not_replay_out_of_order_state_action(self) -> None:
+    def test_tau_mode_can_accept_exact_reference_state_action_jump(self) -> None:
         scenario = scenario_from_record(sample_records()[0], split="train", index=0)
-        env = ReplayRetailEnv(scenario, terminate_on_invalid=False, strict_reference_actions=False)
+        env = ReplayRetailEnv(
+            scenario,
+            terminate_on_invalid=False,
+            strict_reference_actions=False,
+            allow_reference_state_action_jumps=True,
+        )
+        step = env.step(assistant_tool_call("cancel_pending_order", {"order_id": "O-1001"}))
+
+        self.assertEqual(step.invalid_tool_calls, 0)
+        self.assertEqual(step.invalid_state_mutations, 0)
+        self.assertEqual(step.bad_state_actions, 0)
+        self.assertIn("canceled", step.tool_messages[0]["content"])
+        self.assertFalse(step.done)
+
+    def test_tau_mode_can_disable_reference_state_action_jumps(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+        env = ReplayRetailEnv(
+            scenario,
+            terminate_on_invalid=False,
+            strict_reference_actions=False,
+            allow_reference_state_action_jumps=False,
+        )
         step = env.step(assistant_tool_call("cancel_pending_order", {"order_id": "O-1001"}))
 
         self.assertEqual(step.invalid_tool_calls, 1)

@@ -48,6 +48,7 @@ async def rollout_retail(
         scenario,
         terminate_on_invalid=should_terminate_on_invalid,
         strict_reference_actions=strict_reference_actions,
+        allow_reference_state_action_jumps=cfg.allow_reference_state_action_jumps and not strict_reference_actions,
     )
     client = model.openai_client()
     turns = max_turns if max_turns is not None else scenario.max_turns

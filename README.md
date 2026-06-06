@@ -119,6 +119,7 @@ python course/09_runbooks/run_retail_agentic_sequence.py \
 ```
 
 The runbook defaults to `--continue-on-invalid` for tau-style RL. Unexpected state-changing actions are still penalized, but rollouts continue long enough for final state/action and communication rewards to be observed. Use `--no-continue-on-invalid` only when demonstrating strict replay failure modes.
+For tau-inspired profiles, the lightweight replay environment also defaults to `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS=true`: a single exact reference state-changing action can skip preceding read-only replay turns, while wrong state-changing names or arguments still count as bad state actions. This keeps the hands-on proxy closer to tau-style outcome scoring without requiring the full tau2 runtime.
 For the final course report, add stochastic validation with `--eval-rollouts-per-scenario 4 --eval-temperature 0.2` so `outcome_pass_at_k`, `task_pass_at_k`, and reward variance columns are meaningful. Keep the default deterministic eval for quick instructor checks.
 
 On a Slurm H100 cluster, the same flow can be launched with:

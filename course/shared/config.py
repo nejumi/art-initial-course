@@ -29,6 +29,7 @@ DEFAULT_VLLM_MAX_MODEL_LEN = 16384
 DEFAULT_VLLM_GPU_MEMORY_UTILIZATION = 0.70
 DEFAULT_VLLM_MAX_NUM_BATCHED_TOKENS = 16384
 DEFAULT_VLLM_MAX_NUM_SEQS = 8
+DEFAULT_RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS = True
 DEFAULT_RETAIL_TOOL_USE_INSTRUCTION = (
     "When a tool is needed, emit exactly one tool call and no assistant text. "
     "Do not write <think> tags or hidden reasoning in assistant messages. "
@@ -170,6 +171,12 @@ class RetailCourseConfig:
     vllm_max_num_seqs: int | None = field(default_factory=lambda: optional_int_env("ART_VLLM_MAX_NUM_SEQS") or DEFAULT_VLLM_MAX_NUM_SEQS)
     vllm_enforce_eager: bool | None = field(default_factory=lambda: optional_bool_env("ART_VLLM_ENFORCE_EAGER"))
     terminate_on_invalid: bool = field(default_factory=terminate_on_invalid_from_env)
+    allow_reference_state_action_jumps: bool = field(
+        default_factory=lambda: bool_env(
+            "RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS",
+            DEFAULT_RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS,
+        )
+    )
 
 
 def config_from_env() -> RetailCourseConfig:

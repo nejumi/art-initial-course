@@ -239,10 +239,12 @@ class ReplayRetailEnv:
         *,
         terminate_on_invalid: bool = True,
         strict_reference_actions: bool = True,
+        allow_reference_state_action_jumps: bool = False,
     ) -> None:
         self.scenario = scenario
         self.terminate_on_invalid = terminate_on_invalid
         self.strict_reference_actions = strict_reference_actions
+        self.allow_reference_state_action_jumps = allow_reference_state_action_jumps
         self.turns = parse_reference_turns(scenario.reference_messages)
         self.turn_index = 0
         self.invalid_tool_calls = 0
@@ -255,14 +257,34 @@ class ReplayRetailEnv:
         self.terminated_on_invalid = False
         self.actual_tool_names: list[str] = []
         self.valid_tool_names = tool_names_from_schema(scenario.tools)
-        self.reference_tool_outputs: list[tuple[dict[str, Any], str]] = []
-        for turn in self.turns:
+        self.accepted_reference_state_output_indices: set[int] = set()
+        self.reference_tool_outputs: list[tuple[int, dict[str, Any], str]] = []
+        for turn_index, turn in enumerate(self.turns):
             calls = list(turn.assistant_message.get("tool_calls") or [])
             for index, call in enumerate(calls):
                 content = "{}"
                 if index < len(turn.tool_messages):
                     content = str(turn.tool_messages[index].get("content") or "{}")
-                self.reference_tool_outputs.append((dict(call), content))
+                self.reference_tool_outputs.append((turn_index, dict(call), content))
+
+    def _can_accept_reference_state_jump(self, reference_output_index: int) -> bool:
+        if not self.allow_reference_state_action_jumps or self.strict_reference_actions:
+            return False
+        if reference_output_index in self.accepted_reference_state_output_indices:
+            return False
+        if reference_output_index >= len(self.reference_tool_outputs):
+            return False
+        matched_turn_index, matched_call, _content = self.reference_tool_outputs[reference_output_index]
+        if matched_turn_index < self.turn_index or not is_state_changing_tool(tool_call_name(matched_call)):
+            return False
+        for prior_index, (prior_turn_index, prior_call, _prior_content) in enumerate(self.reference_tool_outputs):
+            if prior_index >= reference_output_index:
+                break
+            if prior_turn_index < self.turn_index:
+                continue
+            if is_state_changing_tool(tool_call_name(prior_call)) and prior_index not in self.accepted_reference_state_output_indices:
+                return False
+        return True
 
     def step(self, assistant_message: Any) -> EnvStep:
         msg = message_to_dict(assistant_message)
@@ -278,6 +300,7 @@ class ReplayRetailEnv:
         bad_read_only_calls = 0
         bad_state_actions = 0
         matched_expected_tools = bool(expected) and len(calls) == len(expected_tool_names)
+        accepted_state_jump_turn_index: int | None = None
 
         for index, call in enumerate(calls):
             name = tool_call_name(call)
@@ -287,7 +310,7 @@ class ReplayRetailEnv:
             arguments_match = bool(expected_call) and tool_argument_match_score(call, expected_call) == 1.0
             known_tool = bool(name) and (not self.valid_tool_names or name in self.valid_tool_names)
             state_changing = is_state_changing_tool(name)
-            reference_match = find_matching_reference_call(call, [item[0] for item in self.reference_tool_outputs])
+            reference_match = find_matching_reference_call(call, [item[1] for item in self.reference_tool_outputs])
             if not known_tool:
                 invalid += 1
                 unknown_tool_calls += 1
@@ -308,9 +331,23 @@ class ReplayRetailEnv:
                 # unique reference path. If the model calls any known reference
                 # read-only tool with exact arguments, return the recorded
                 # observation but keep scripted user progression unchanged.
-                # State-changing calls must match the current expected action
-                # because replaying them out of order would fake a DB mutation.
-                content = self.reference_tool_outputs[reference_match[0]][1]
+                # State-changing calls are handled separately: only a single
+                # exact reference mutation may advance the replay cursor.
+                content = self.reference_tool_outputs[reference_match[0]][2]
+                matched_expected_tools = False
+            elif (
+                reference_match is not None
+                and state_changing
+                and len(calls) == 1
+                and self._can_accept_reference_state_jump(reference_match[0])
+            ):
+                # Tau-style scoring cares about the target state mutation, not
+                # exact read-only replay. For the lightweight replay environment,
+                # allow a single exact reference state-changing action to skip
+                # preceding read-only turns while still rejecting wrong mutations.
+                matched_turn_index, _matched_call, content = self.reference_tool_outputs[reference_match[0]]
+                self.accepted_reference_state_output_indices.add(reference_match[0])
+                accepted_state_jump_turn_index = matched_turn_index
                 matched_expected_tools = False
             else:
                 if self.strict_reference_actions or state_changing:
@@ -360,6 +397,10 @@ class ReplayRetailEnv:
             done = True
         elif terminated_on_invalid:
             done = True
+        elif accepted_state_jump_turn_index is not None and invalid == 0:
+            user_messages = list(self.turns[accepted_state_jump_turn_index].user_messages)
+            self.turn_index = max(self.turn_index, accepted_state_jump_turn_index + 1)
+            done = self.turn_index >= len(self.turns)
         elif expected_tool_names:
             if matched_expected_tools and invalid == 0:
                 user_messages = list(expected.user_messages)

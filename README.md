@@ -26,6 +26,23 @@ The course intentionally uses public datasets so a workshop can run end to end w
 
 Full-dialog SFT is easy to explain, but it can over-supervise long dialogue style and final responses. Next-action SFT is the stronger path when we want to align with modern agent training recipes and avoid training on every prior assistant action repeatedly.
 
+## Task and Metric Terminology
+
+The hands-on task is a retail customer-support agent. A user asks for help with an order, return, cancellation, exchange, address issue, or similar workflow. The agent reads customer/order/product/policy state with read-only tools, decides whether a consequential state-changing action is allowed, calls the correct state-changing tool with correct arguments, then communicates the outcome to the user.
+
+The bridge curriculum intentionally keeps the first RL lab short: most examples have one consequential state-changing action. That makes the class focus on the core agentic loop: read state, decide policy, mutate state correctly, and communicate.
+
+Do not confuse experiment labels with metrics:
+
+| Term | Type | Meaning |
+| --- | --- | --- |
+| `bridge-only` | Experiment condition | SFT uses only local bridge next-action rows. |
+| `teacher mix` | Experiment condition | SFT mixes bridge rows with public scored teacher next-action rows. |
+| `success mix` | Experiment condition | SFT mixes bridge rows with successful public tau2 retail traces converted to next-action rows. |
+| `task_success` | Metric | Strict exact reference tool-call sequence success with no invalid tool call. Useful for diagnosing trace imitation, but stricter than tau-style outcome scoring. |
+| `outcome_success` / `proxy_outcome_success` | Metric | Lightweight tau-style proxy: correct state-changing action sequence, successful communication, no bad/missing/invalid state action, and no truncation. |
+| `reward` | Metric | The configured reward profile, usually `tau_irc`: weighted outcome, state-action, argument, communication, and penalty terms. |
+
 For workshop reporting, keep data lineage and split hygiene explicit. Every mixed SFT row carries source metadata, and data artifacts include generated summaries so instructors can check which source IDs entered training. Do not present official tau2 numbers for an eval task set that may overlap with public teacher or success-trace SFT rows; use those runs as training-proxy demos unless the held-out task IDs have been audited.
 
 ## Quick Start

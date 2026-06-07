@@ -13,6 +13,8 @@
 - 追加SFT warm start: `amityco/tau-bench-retail-train-next-action-all-step-score-v0.2`、`inclusionAI/AReaL-tau2-data`、`KermitCO/qwen3.5-9B-tau2bench-retail-traces`
 - RL rollout / reward / eval設計: tau-bench / tau2-bench retailの考え方を簡略化して利用
 
+`success mix`、`teacher mix`、`bridge-only` は実験条件名です。`task_success`、`outcome_success`、`reward` は評価指標です。詳しい定義は英語版READMEの "Task and Metric Terminology" を参照してください。
+
 ## 推奨モデル
 
 H100を使うメインハンズオンでは `ART_MODEL_PROFILE=standard` を推奨します。現在のstandardは `LiquidAI/LFM2.5-8B-A1B` です。

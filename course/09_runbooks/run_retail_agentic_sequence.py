@@ -395,6 +395,7 @@ def train_rl_branch(
     branch_model = retail_model_name(args.run_slug, branch_stage)
     branch_env = {**env, "ART_MODEL_NAME": branch_model}
     parent_artifact = artifact_uri(f"{anchor_model}-checkpoint", "sft-anchor")
+    metrics_path = report_dir / f"train_metrics_{algo}_{args.rl_suffix}.jsonl"
     train_scripts = {
         "grpo": "course/04_grpo_local/train_grpo_local.py",
         "gspo": "course/06_gspo_and_configs/train_gspo_sequence.py",
@@ -445,7 +446,7 @@ def train_rl_branch(
         "--gpu-cost-per-hour-usd",
         str(args.gpu_cost_per_hour_usd),
         "--metrics-jsonl",
-        path_arg(report_dir / f"train_metrics_{algo}_{args.rl_suffix}.jsonl"),
+        path_arg(metrics_path),
     ]
     if algo == "ruler":
         command += [
@@ -461,6 +462,26 @@ def train_rl_branch(
         command.append("--no-logprobs")
     command += weave_args(args)
     run_command(f"{algo.upper()} training", command, env=branch_env, dry_run=args.dry_run)
+    if args.select_rl_candidates:
+        run_command(
+            f"select {algo} checkpoint candidates",
+            [
+                sys.executable,
+                "-B",
+                "course/02_weave_evals/select_checkpoint_candidate.py",
+                path_arg(metrics_path),
+                "--metric",
+                args.rl_candidate_metric,
+                "--top-k",
+                str(args.rl_candidate_top_k),
+                "--output-md",
+                path_arg(report_dir / f"{algo}_{args.rl_suffix}_checkpoint_candidates.md"),
+                "--output-json",
+                path_arg(report_dir / f"{algo}_{args.rl_suffix}_checkpoint_candidates.json"),
+            ],
+            env=branch_env,
+            dry_run=args.dry_run,
+        )
     run_command(
         f"eval {algo} train subset",
         evaluate_command(
@@ -686,6 +707,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rl-learning-rate", type=float, default=2e-6)
     parser.add_argument("--rl-temperature", type=float, default=0.9)
     parser.add_argument("--rl-max-turns", type=int, default=None)
+    parser.add_argument(
+        "--select-rl-candidates",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Write checkpoint candidate Markdown/JSON from per-step RL metrics before held-out eval.",
+    )
+    parser.add_argument("--rl-candidate-metric", default="data/step_reward_mean")
+    parser.add_argument("--rl-candidate-top-k", type=int, default=3)
     parser.add_argument("--ruler-judge-model", default="openai/gpt-5.5")
     parser.add_argument("--ruler-judge-effort", default="medium", choices=["low", "medium", "high", "xhigh"])
     parser.add_argument(

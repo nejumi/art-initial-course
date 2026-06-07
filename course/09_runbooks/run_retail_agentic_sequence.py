@@ -454,6 +454,10 @@ def train_rl_branch(
             args.ruler_judge_model,
             "--judge-effort",
             args.ruler_judge_effort,
+            "--ruler-weight",
+            str(args.ruler_weight),
+            "--independent-weight",
+            str(args.independent_weight),
         ]
     command += maybe_append("--max-turns", args.rl_max_turns)
     if args.continue_on_invalid:
@@ -717,6 +721,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rl-candidate-top-k", type=int, default=3)
     parser.add_argument("--ruler-judge-model", default="openai/gpt-5.5")
     parser.add_argument("--ruler-judge-effort", default="medium", choices=["low", "medium", "high", "xhigh"])
+    parser.add_argument("--ruler-weight", type=float, default=0.3)
+    parser.add_argument("--independent-weight", type=float, default=0.7)
     parser.add_argument(
         "--continue-on-invalid",
         action=argparse.BooleanOptionalAction,

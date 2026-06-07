@@ -41,6 +41,8 @@ async def main_async() -> None:
     parser.add_argument("--max-completion-tokens", type=int, default=None)
     parser.add_argument("--judge-model", default="openai/gpt-5.5")
     parser.add_argument("--judge-effort", default="medium", choices=["low", "medium", "high", "xhigh"])
+    parser.add_argument("--ruler-weight", type=float, default=0.3)
+    parser.add_argument("--independent-weight", type=float, default=0.7)
     parser.add_argument("--seed", type=int, default=11)
     parser.add_argument("--max-sampling-rounds", type=int, default=4)
     parser.add_argument("--keep-zero-variance-groups", action="store_true")
@@ -107,8 +109,10 @@ async def main_async() -> None:
         for traj in judged:
             independent = float(traj.metrics.get("independent_reward", 0.0))
             ruler = float(traj.metrics.get("ruler_score", traj.reward))
-            traj.reward = 0.7 * ruler + 0.3 * independent
+            traj.reward = args.ruler_weight * ruler + args.independent_weight * independent
             traj.metrics["hybrid_reward"] = traj.reward
+            traj.metrics["ruler_weight"] = args.ruler_weight
+            traj.metrics["independent_weight"] = args.independent_weight
         return judged
 
     last_step = await model.get_step()
@@ -194,6 +198,8 @@ async def main_async() -> None:
                 "ruler_rubric": RULER_RUBRIC.strip(),
                 "judge_model": args.judge_model,
                 "judge_effort": args.judge_effort,
+                "ruler_weight": args.ruler_weight,
+                "independent_weight": args.independent_weight,
                 "steps": args.steps,
                 "final_step": last_step,
                 "groups_per_step": args.groups_per_step,

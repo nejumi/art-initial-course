@@ -38,6 +38,8 @@ RL_SUFFIX="${14:-balanced-s18-g8-lr5e7}"
 REPORT_DIR="${15:-$DATA_DIR/${RUN_SLUG}_${RL_SUFFIX}_runbook}"
 MAX_COMPLETION_TOKENS="${16:-768}"
 RL_CANDIDATE_METRIC="${17:-data/step_course_score_mean}"
+RULER_WEIGHT="${18:-0.3}"
+INDEPENDENT_WEIGHT="${19:-0.7}"
 
 mkdir -p .art/sunk_runs/logs
 mkdir -p "$REPORT_DIR"
@@ -69,6 +71,8 @@ echo "rl_rollouts_per_scenario=$RL_ROLLOUTS_PER_SCENARIO"
 echo "rl_learning_rate=$RL_LEARNING_RATE"
 echo "rl_suffix=$RL_SUFFIX"
 echo "rl_candidate_metric=$RL_CANDIDATE_METRIC"
+echo "ruler_weight=$RULER_WEIGHT"
+echo "independent_weight=$INDEPENDENT_WEIGHT"
 echo "report_dir=$REPORT_DIR"
 hostname
 date -Is
@@ -92,6 +96,8 @@ python -B course/09_runbooks/run_retail_agentic_sequence.py \
   --rl-learning-rate "$RL_LEARNING_RATE" \
   --rl-suffix "$RL_SUFFIX" \
   --rl-candidate-metric "$RL_CANDIDATE_METRIC" \
+  --ruler-weight "$RULER_WEIGHT" \
+  --independent-weight "$INDEPENDENT_WEIGHT" \
   --max-completion-tokens "$MAX_COMPLETION_TOKENS" \
   --report-dir "$REPORT_DIR" \
   --skip-compare \

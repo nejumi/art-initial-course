@@ -126,6 +126,8 @@ SFT/RL設計の実務的学び:
 - SFTはagentic RLの代替ではなく、tool-call dialect、policy adherence、初期成功率、rolloutの安定性を整えるwarm startとして位置づける。
 - RLの報酬設計は、final successだけの疎な報酬では信号が弱く、dense rewardを足しすぎると本来の成功方向とずれることがある。verifiable outcome、state-changing action correctness、communication quality、安全ペナルティを分けて設計する。
 - 報酬設計は一度で決めない。既存研究のレシピを初期仮説にし、reward profile、penalty weight、learning rate、checkpoint selection metricを複数水準で比較する。
+- RULERは、正解DB stateのような厳密検証を置き換えるものではなく、会話品質、ポリシー説明、簡潔さ、安全な顧客対応など、verifierだけでは表現しにくい軸を補助するために使う。
+- Retail taskでは、`verifier reward` を主軸にし、RULERを低めの重みでhybrid rewardに混ぜる水準と、RULERを強める水準を比較する。
 - 短いbridge curriculumで `next-action SFT -> GRPO branch / GSPO branch` を独立比較し、`tau_irc` 系報酬、state-changing action correctness、communication success、proxy outcome success、official tau2 importを横持ち表で検証する。
 - SFT checkpointはlossだけでは採用しない。baseline/SFT/RLを同じholdoutでWeave evalし、SFTが少なくともtool-call形式とstate-changing action指標を改善していることを確認してからRL parentにする。
 - RLは「エラーなく回る」では合格にしない。group内reward variance、winner-minus-loser差分、zero-variance group filter、state-action attempt/reached rate、bad/missing state-action rateをW&Bに出し、GRPO/GSPOが実際に学習信号を受けていることを確認する。

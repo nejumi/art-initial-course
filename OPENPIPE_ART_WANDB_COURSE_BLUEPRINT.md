@@ -1,7 +1,7 @@
 # OpenPipe ART x W&B Models x Weave Training Course Blueprint
 
 作成日: 2026-05-29  
-最終更新: 2026-06-06
+最終更新: 2026-06-07
 想定: エンタープライズ利用者向け。ローカルGPU / Dedicated Cloud / Customer Managed (W&B公式名称では Self-Managed) を主軸にし、Multi-tenant SaaS と Serverless RL は比較・補足として扱う。
 
 ## 1. コースの北極星
@@ -73,6 +73,36 @@ API smoke test:
 - 2日集中ワークショップ + 事前セットアップ + 事後capstone
 - 各章は「10-20分の座学 -> 20-45分のハンズオン -> W&B/Weaveで観察 -> 設計判断ディスカッション」の型で進める。
 - 受講者はGPUに応じて2つの演習トラックを選ぶ。
+
+### 3.1 Panasonic向け90分デリバリー版
+
+木曜デリバリーの現実的な北極星は「その場で長期RLを完走する」ではなく、「W&B Models / Weave / ARTでagentic SFT/RLをどう設計・観測・検証するかを理解し、短い実行で初期信号を見て、フル検証済み結果で有効性を確認する」こと。
+
+90分の推奨配分:
+
+| 時間 | 内容 | その場で動かすもの | 見せる証拠 |
+| ---: | --- | --- | --- |
+| 0-10分 | W&B Models / Weave復習 | W&B project, Artifact, Weave traceを開く | dataset artifact, SFT checkpoint artifact, trace例 |
+| 10-20分 | ART概念マップ | `Scenario -> rollout -> TrajectoryGroup -> train` の最小コード確認 | W&B metricsとWeave traceの対応 |
+| 20-35分 | Retail taskと評価指標 | cached eval JSONL / Weave Evaluationを見る | `task_success` と `outcome_success` の違い |
+| 35-50分 | SFT warm start | 小モデルまたはdry-runでSFT commandを実行 | SFT loss curve、checkpoint artifact lineage |
+| 50-70分 | GRPO/GSPO/RULERの考え方 | 可能なら1-2 stepの短いGRPO smoke | group reward range、winner-minus-loser、dropped no-signal groups |
+| 70-82分 | フル検証済みH100結果 | 事前runのW&B table / Weave tracesを読む | held-out validationでSFT/RLが改善した表 |
+| 82-90分 | Enterprise運用設計 | Dedicated Cloud / Self-Managed / LocalBackend比較 | Registry昇格、Artifact lineage、再現性チェックリスト |
+
+実行トラック:
+
+- No GPU / ネットワーク制限あり: `.env`、data artifact、cached eval、Weave trace、runbook dry-runを中心にする。
+- 小さめGPU: `ART_MODEL_PROFILE=tiny` または小型HF互換モデルで、setup、SFT、GRPO smokeの流れを確認する。性能改善は期待結果として扱わない。
+- H100 1枚: `LiquidAI/LFM2.5-8B-A1B` で短いSFTと数stepのGRPOを実行し、初期上昇やreward varianceを観測する。長期runは宿題または講師事前runにする。
+- H100複数枚: SFT parentからGRPO/GSPO/RULERを独立分岐で並列実行し、checkpoint candidate selectionとheld-out evalまで行う。
+
+この90分版では、嘘をつかないために次を明確に言う:
+
+- 小モデルや短時間runは操作手順と初期信号を見るためのもの。
+- 「Agentic RLが有効」と言える根拠は、講師側で事前にH100フル検証したheld-out validation、W&B Artifact lineage、Weave traceで示す。
+- 長期RLは単調改善しない。`select_checkpoint_candidate.py` で中間checkpointを選び、fresh validation evalで採用する。
+- 最終期待結果表にはtrain rewardのbest rowを載せない。必ずheld-out evalとacceptance gateを通った結果だけを載せる。
 
 トラック:
 

@@ -18,7 +18,7 @@ from course.shared.rewards import REWARD_PROFILES
 from course.shared.rl_sampling import reward_signal_metrics, split_reward_signal_groups
 from course.shared.rollout import rollout_retail
 from course.shared.tracing import init_weave
-from course.shared.wandb_artifacts import log_checkpoint_artifact, use_wandb_artifact
+from course.shared.wandb_artifacts import ensure_wandb_run, log_checkpoint_artifact, log_wandb_metrics, use_wandb_artifact
 
 
 async def main_async() -> None:
@@ -52,7 +52,8 @@ async def main_async() -> None:
         os.environ["RETAIL_REWARD_PROFILE"] = args.reward_profile
     cfg = config_from_env()
     if args.weave:
-        init_weave(cfg.project)
+        ensure_wandb_run(cfg, job_type="grpo")
+        init_weave()
     data_dir = Path(args.data_dir)
     if not (data_dir / f"{args.split}.jsonl").exists():
         write_sample_dataset(data_dir)
@@ -136,6 +137,7 @@ async def main_async() -> None:
         if not groups:
             print("Skipping GRPO step because no sampled groups had reward variance.", dynamic_filter_metrics)
             await model.log(trajectories=None, metrics=dynamic_filter_metrics, step=last_step, split="train")
+            log_wandb_metrics(cfg, dynamic_filter_metrics, job_type="grpo", step=last_step)
             append_step_metrics(
                 args.metrics_jsonl,
                 step=last_step,
@@ -152,6 +154,7 @@ async def main_async() -> None:
             **reward_signal_metrics(groups, prefix="data/train"),
         }
         await model.log(groups, metrics=metrics, step=result.step, split="train")
+        log_wandb_metrics(cfg, metrics, job_type="grpo", step=result.step)
         last_step = result.step
         append_step_metrics(args.metrics_jsonl, step=result.step, algorithm="grpo", metrics=metrics)
         print("step", result.step, metrics)

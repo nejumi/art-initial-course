@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import argparse
 import asyncio
+import os
 from typing import Any
 
 from course.shared.config import config_from_env
@@ -17,8 +18,8 @@ from course.shared.wandb_artifacts import artifact_with_alias, ensure_wandb_run,
 
 SUMMARY_METRICS = [
     "course_eval_score",
-    "outcome_success",
-    "task_success",
+    "retail_task_success",
+    "reference_tool_sequence_exact_match",
     "state_action_sequence_match",
     "valid_state_action_rate",
     "communication_success",
@@ -43,7 +44,12 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, float | int]:
         row_metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
         for key in SUMMARY_METRICS:
             try:
-                metrics[key].append(float(row_metrics.get(key)))
+                value = row_metrics.get(key)
+                if value is None and key == "retail_task_success":
+                    value = row_metrics.get("proxy_tau2_success", row_metrics.get("outcome_success"))
+                if value is None and key == "reference_tool_sequence_exact_match":
+                    value = row_metrics.get("task_success")
+                metrics[key].append(float(value))
             except Exception:
                 pass
     summary: dict[str, float | int] = {"rows": len(rows)}
@@ -109,11 +115,9 @@ async def main_async() -> None:
     run = None
     owned_run = False
     if not args.no_wandb:
-        run, owned_run = ensure_wandb_run(
-            cfg,
-            job_type="weave-cached-eval",
-            run_name=args.name or f"{args.stage}-cached-checkpoint-eval",
-        )
+        os.environ.setdefault("COURSE_RUN_STAGE", f"cached-eval-{args.stage}")
+        os.environ.setdefault("COURSE_RUN_KIND", "eval")
+        run, owned_run = ensure_wandb_run(cfg, job_type="weave-cached-eval")
         if run is not None:
             run.config.update(
                 {
@@ -159,7 +163,7 @@ async def main_async() -> None:
             for key, value in summarize_rows(rows).items():
                 run.summary[key] = value
 
-    init_weave(cfg.project)
+    init_weave()
     import weave
     from course.weave_eval_scorers import SCORERS as scorers
 

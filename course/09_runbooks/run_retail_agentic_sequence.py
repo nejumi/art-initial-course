@@ -7,8 +7,36 @@ import subprocess
 import sys
 from typing import Sequence
 
+import yaml
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from course.shared.config import MODEL_PROFILES, config_from_env
+
+DEFAULT_RUN_CONFIG = PROJECT_ROOT / "course" / "09_runbooks" / "config.yaml"
+DEFAULT_BASE_CONFIG = PROJECT_ROOT / "course" / "09_runbooks" / "base_config.yaml"
+PROFILE_PATH_KEYS = {
+    "art_path",
+    "data_dir",
+    "source_dir",
+    "report_dir",
+    "sft_file",
+    "vllm_runtime_cache_dir",
+    "hf_home",
+}
+
+
+def load_yaml_mapping(config_path: Path, *, required: bool = True) -> dict[str, object]:
+    if not config_path.exists():
+        if required:
+            raise SystemExit(f"Config file not found: {config_path}")
+        return {}
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise SystemExit(f"Config file must be a YAML mapping: {config_path}")
+    return data
 
 
 def run_command(
@@ -36,6 +64,30 @@ def maybe_append(flag: str, value: object | None) -> list[str]:
     return [flag, str(value)]
 
 
+def stage_env(
+    env: dict[str, str],
+    *,
+    stage: str,
+    kind: str,
+    algo: str | None = None,
+    split: str | None = None,
+) -> dict[str, str]:
+    scoped = {
+        **env,
+        "COURSE_RUN_STAGE": stage,
+        "COURSE_RUN_KIND": kind,
+    }
+    if algo:
+        scoped["COURSE_RUN_ALGO"] = algo
+    else:
+        scoped.pop("COURSE_RUN_ALGO", None)
+    if split:
+        scoped["COURSE_RUN_SPLIT"] = split
+    else:
+        scoped.pop("COURSE_RUN_SPLIT", None)
+    return scoped
+
+
 def artifact_uri(name: str, alias: str = "latest") -> str:
     return f"{name}:{alias}"
 
@@ -48,12 +100,118 @@ def split_csv(value: str) -> list[str]:
     return [part.strip() for part in value.split(",") if part.strip()]
 
 
+def resolve_profile_path(value: object) -> object:
+    if value is None:
+        return None
+    path = Path(str(value))
+    if path.is_absolute():
+        return path
+    return PROJECT_ROOT / path
+
+
+def normalize_profile_defaults(args: dict[str, object], *, label: str) -> dict[str, object]:
+    defaults: dict[str, object] = {}
+    for key, value in args.items():
+        if key in {"description", "notes"}:
+            continue
+        if value is None:
+            continue
+        defaults[key] = resolve_profile_path(value) if key in PROFILE_PATH_KEYS else value
+    return defaults
+
+
+def load_run_profile_defaults(profile_name: str | None, config_path: Path) -> dict[str, object]:
+    if not profile_name:
+        return {}
+    data = load_yaml_mapping(config_path)
+    profiles = data.get("profiles")
+    if not isinstance(profiles, dict):
+        raise SystemExit(f"Run profile config must contain a 'profiles' mapping: {config_path}")
+    profile = profiles.get(profile_name)
+    if not isinstance(profile, dict):
+        available = ", ".join(sorted(str(key) for key in profiles))
+        raise SystemExit(f"Unknown --run-profile={profile_name!r}. Available profiles: {available}")
+    args = profile.get("args", profile)
+    if not isinstance(args, dict):
+        raise SystemExit(f"Run profile {profile_name!r} must contain an args mapping.")
+    return normalize_profile_defaults(args, label=f"profile {profile_name!r}")
+
+
+def configured_run_profile(config_path: Path) -> str | None:
+    data = load_yaml_mapping(config_path, required=False)
+    run_profile = data.get("run_profile")
+    if run_profile in {None, ""}:
+        return None
+    if not isinstance(run_profile, str):
+        raise SystemExit("Run config 'run_profile' must be a string when set.")
+    return run_profile
+
+
+def load_user_config_defaults(config_path: Path, base_config_path: Path) -> dict[str, object]:
+    data = load_yaml_mapping(config_path, required=False)
+    defaults: dict[str, object] = {}
+
+    model_profile = data.get("model_profile")
+    if model_profile not in {None, "", "from_env"}:
+        if not isinstance(model_profile, str):
+            raise SystemExit("Run config 'model_profile' must be a string when set.")
+        defaults["model_profile"] = model_profile
+        if model_profile == "custom":
+            base_model = data.get("base_model")
+            if not base_model:
+                raise SystemExit("Run config uses model_profile: custom, so base_model must be set.")
+            defaults["base_model"] = str(base_model)
+        else:
+            try:
+                defaults["base_model"] = MODEL_PROFILES[model_profile]
+            except KeyError as exc:
+                allowed = ", ".join(["from_env", "custom", *sorted(MODEL_PROFILES)])
+                raise SystemExit(f"Unknown model_profile={model_profile!r}. Use one of: {allowed}.") from exc
+
+    base_model = data.get("base_model")
+    if base_model not in {None, ""}:
+        defaults["base_model"] = str(base_model)
+
+    gpu_memory_preset = data.get("gpu_memory_preset")
+    if gpu_memory_preset not in {None, "", "standard"}:
+        if not isinstance(gpu_memory_preset, str):
+            raise SystemExit("Run config 'gpu_memory_preset' must be a string when set.")
+        base_data = load_yaml_mapping(base_config_path)
+        presets = base_data.get("gpu_memory_presets") or {}
+        if not isinstance(presets, dict):
+            raise SystemExit("Base config 'gpu_memory_presets' must be a mapping when set.")
+        preset = presets.get(gpu_memory_preset)
+        if not isinstance(preset, dict):
+            available = ", ".join(sorted(str(key) for key in presets))
+            raise SystemExit(f"Unknown gpu_memory_preset={gpu_memory_preset!r}. Available presets: {available}")
+        defaults.update(normalize_profile_defaults(preset, label=f"gpu_memory_preset {gpu_memory_preset!r}"))
+
+    overrides = data.get("overrides") or {}
+    if not isinstance(overrides, dict):
+        raise SystemExit("Run config 'overrides' must be a mapping when set.")
+    defaults.update(normalize_profile_defaults(overrides, label="overrides"))
+    return defaults
+
+
+def preparse_profile_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--run-profile", default=None)
+    parser.add_argument("--config", type=Path, default=DEFAULT_RUN_CONFIG)
+    parser.add_argument("--base-config", type=Path, default=DEFAULT_BASE_CONFIG)
+    parser.add_argument("--profile-config", type=Path, default=None, help=argparse.SUPPRESS)
+    args, _ = parser.parse_known_args(argv)
+    args.config = args.config.resolve()
+    args.base_config = (args.profile_config or args.base_config).resolve()
+    args.run_profile = args.run_profile or configured_run_profile(args.config)
+    return args
+
+
 def base_env(args: argparse.Namespace) -> dict[str, str]:
     env = os.environ.copy()
     env.update(
         {
             "ART_BASE_MODEL": args.base_model,
-            "ART_MODEL_PROFILE": "custom",
+            "ART_MODEL_PROFILE": args.model_profile,
             "ART_PATH": path_arg(args.art_path),
             "RETAIL_REWARD_PROFILE": args.reward_profile,
             "RETAIL_DATA_ARTIFACT_NAME": args.data_artifact_name,
@@ -64,6 +222,9 @@ def base_env(args: argparse.Namespace) -> dict[str, str]:
             "HF_HOME": path_arg(args.hf_home),
             "TRANSFORMERS_CACHE": path_arg(args.hf_home / "transformers"),
             "HF_XET_HIGH_PERFORMANCE": "1",
+            "COURSE_RUN_PROFILE": args.run_profile or "custom",
+            "COURSE_RUN_SLUG": args.run_slug,
+            "COURSE_IGNORE_RUN_CONFIG": "1",
             "PYTHONUNBUFFERED": "1",
         }
     )
@@ -338,7 +499,10 @@ def evaluate_command(
 
 def train_sft(args: argparse.Namespace, env: dict[str, str], report_dir: Path) -> str:
     anchor_model = retail_model_name(args.run_slug, "sft-anchor")
-    sft_env = {**env, "ART_MODEL_NAME": anchor_model}
+    sft_env = {
+        **stage_env(env, stage="sft-train", kind="training", algo="sft"),
+        "ART_MODEL_NAME": anchor_model,
+    }
     default_sft_file = augmented_sft_file(args)
     sft_file = args.sft_file or default_sft_file
     command = [
@@ -367,6 +531,10 @@ def train_sft(args: argparse.Namespace, env: dict[str, str], report_dir: Path) -
     run_command("SFT anchor", command, env=sft_env, dry_run=args.dry_run)
     if args.skip_sft_eval:
         return anchor_model
+    sft_eval_env = {
+        **stage_env(env, stage="sft-eval", kind="eval", algo="sft", split=args.eval_split),
+        "ART_MODEL_NAME": anchor_model,
+    }
     run_command(
         "eval SFT anchor",
         evaluate_command(
@@ -377,7 +545,7 @@ def train_sft(args: argparse.Namespace, env: dict[str, str], report_dir: Path) -
             output=report_dir / "eval_01_sft_anchor.jsonl",
             model_artifact=artifact_uri(f"{anchor_model}-checkpoint", "sft-anchor"),
         ),
-        env=sft_env,
+        env=sft_eval_env,
         dry_run=args.dry_run,
     )
     return anchor_model
@@ -393,7 +561,10 @@ def train_rl_branch(
 ) -> str:
     branch_stage = f"{algo}-{args.rl_suffix}"
     branch_model = retail_model_name(args.run_slug, branch_stage)
-    branch_env = {**env, "ART_MODEL_NAME": branch_model}
+    branch_train_env = {
+        **stage_env(env, stage=f"{algo}-train", kind="training", algo=algo),
+        "ART_MODEL_NAME": branch_model,
+    }
     parent_artifact = artifact_uri(f"{anchor_model}-checkpoint", "sft-anchor")
     metrics_path = report_dir / f"train_metrics_{algo}_{args.rl_suffix}.jsonl"
     train_scripts = {
@@ -412,7 +583,12 @@ def train_rl_branch(
             anchor_model,
             "--verbose",
         ],
-        env=branch_env,
+        env=stage_env(
+            {**env, "ART_MODEL_NAME": branch_model},
+            stage=f"{algo}-checkpoint-fork",
+            kind="artifact",
+            algo=algo,
+        ),
         dry_run=args.dry_run,
     )
     command = [
@@ -465,7 +641,7 @@ def train_rl_branch(
     if args.no_logprobs:
         command.append("--no-logprobs")
     command += weave_args(args)
-    run_command(f"{algo.upper()} training", command, env=branch_env, dry_run=args.dry_run)
+    run_command(f"{algo.upper()} training", command, env=branch_train_env, dry_run=args.dry_run)
     if args.select_rl_candidates:
         run_command(
             f"select {algo} checkpoint candidates",
@@ -483,9 +659,18 @@ def train_rl_branch(
                 "--output-json",
                 path_arg(report_dir / f"{algo}_{args.rl_suffix}_checkpoint_candidates.json"),
             ],
-            env=branch_env,
+            env=stage_env(
+                {**env, "ART_MODEL_NAME": branch_model},
+                stage=f"{algo}-candidate-selection",
+                kind="comparison",
+                algo=algo,
+            ),
             dry_run=args.dry_run,
         )
+    branch_train_eval_env = {
+        **stage_env(env, stage=f"{algo}-train-subset-eval", kind="eval", algo=algo, split=args.rl_split),
+        "ART_MODEL_NAME": branch_model,
+    }
     run_command(
         f"eval {algo} train subset",
         evaluate_command(
@@ -497,9 +682,13 @@ def train_rl_branch(
             model_artifact=artifact_uri(f"{branch_model}-checkpoint"),
             include_messages=True,
         ),
-        env=branch_env,
+        env=branch_train_eval_env,
         dry_run=args.dry_run,
     )
+    branch_validation_eval_env = {
+        **stage_env(env, stage=f"{algo}-validation-eval", kind="eval", algo=algo, split=args.eval_split),
+        "ART_MODEL_NAME": branch_model,
+    }
     run_command(
         f"eval {algo} validation",
         evaluate_command(
@@ -511,7 +700,7 @@ def train_rl_branch(
             model_artifact=artifact_uri(f"{branch_model}-checkpoint"),
             include_messages=True,
         ),
-        env=branch_env,
+        env=branch_validation_eval_env,
         dry_run=args.dry_run,
     )
     return branch_model
@@ -574,12 +763,15 @@ def compare_results(
         path_arg(report_dir / "checkpoint_eval_comparison.csv"),
         "--output-compact-csv",
         path_arg(report_dir / "checkpoint_eval_summary.csv"),
-        "--run-name",
-        f"{args.run_slug}-checkpoint-eval-comparison",
     ]
     if not args.no_wandb_compare:
         command.append("--wandb")
-    run_command("checkpoint comparison", command, env=env, dry_run=args.dry_run)
+    run_command(
+        "checkpoint comparison",
+        command,
+        env=stage_env(env, stage="checkpoint-comparison", kind="comparison"),
+        dry_run=args.dry_run,
+    )
     run_command(
         "stage acceptance gate",
         [
@@ -596,7 +788,7 @@ def compare_results(
             "--output-json",
             path_arg(report_dir / "checkpoint_acceptance.json"),
         ],
-        env=env,
+        env=stage_env(env, stage="checkpoint-acceptance", kind="comparison"),
         dry_run=args.dry_run,
     )
     if not args.no_weave and not args.skip_weave_cached_evals:
@@ -617,19 +809,33 @@ def compare_results(
             ]
             if model_artifact != "-":
                 weave_command += ["--model-artifact", model_artifact]
-            run_command(f"Weave cached eval {stage}", weave_command, env=env, dry_run=args.dry_run)
+            run_command(
+                f"Weave cached eval {stage}",
+                weave_command,
+                env=stage_env(env, stage=f"cached-eval-{stage}", kind="eval"),
+                dry_run=args.dry_run,
+            )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    profile_args = preparse_profile_args(argv)
+    profile_defaults = load_run_profile_defaults(profile_args.run_profile, profile_args.base_config)
+    profile_defaults.update(load_user_config_defaults(profile_args.config, profile_args.base_config))
+    cfg = config_from_env()
     parser = argparse.ArgumentParser(
         description=(
             "Run the retail ART hands-on sequence: data artifact, baseline eval, "
             "next-action SFT, independent GRPO/GSPO branches, eval, and W&B comparison."
         )
     )
+    parser.add_argument("--run-profile", default=profile_args.run_profile)
+    parser.add_argument("--config", type=Path, default=profile_args.config)
+    parser.add_argument("--base-config", type=Path, default=profile_args.base_config)
+    parser.add_argument("--profile-config", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--run-slug", default="lfm25-8b-a1b-bridge-state1")
-    parser.add_argument("--base-model", default="LiquidAI/LFM2.5-8B-A1B")
-    parser.add_argument("--art-path", type=Path, default=PROJECT_ROOT / ".art" / "course_runs")
+    parser.add_argument("--model-profile", default=cfg.model_profile)
+    parser.add_argument("--base-model", default=cfg.base_model)
+    parser.add_argument("--art-path", type=Path, default=Path(cfg.art_path) / "course_runs")
     parser.add_argument("--data-dir", type=Path, default=PROJECT_ROOT / "data" / "retail_bridge_state1")
     parser.add_argument("--source-dir", type=Path, default=PROJECT_ROOT / "data" / "retail")
     parser.add_argument("--report-dir", type=Path, default=None)
@@ -744,11 +950,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-weave", action="store_true")
     parser.add_argument("--no-wandb-compare", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
-    return parser.parse_args()
+    parser.set_defaults(**profile_defaults)
+    return parser.parse_args(argv)
 
 
 def main() -> None:
     args = parse_args()
+    if args.run_profile:
+        print(f"Using run profile: {args.run_profile}")
+        print(f"User config: {args.config}")
+        print(f"Base config: {args.base_config}")
     args.data_dir = args.data_dir.resolve()
     args.source_dir = args.source_dir.resolve()
     args.art_path = args.art_path.resolve()
@@ -775,11 +986,14 @@ def main() -> None:
             "latest",
             "tau-retail-bridge",
         ],
-        env=env,
+        env=stage_env(env, stage="data-artifact", kind="data"),
         dry_run=args.dry_run,
     )
     if not args.skip_baseline_eval:
-        baseline_env = {**env, "ART_MODEL_NAME": retail_model_name(args.run_slug, "baseline")}
+        baseline_env = {
+            **stage_env(env, stage="baseline-eval", kind="eval", split=args.eval_split),
+            "ART_MODEL_NAME": retail_model_name(args.run_slug, "baseline"),
+        }
         run_command(
             "eval baseline",
             evaluate_command(

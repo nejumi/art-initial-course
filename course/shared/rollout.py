@@ -7,11 +7,35 @@ from .data import augment_system_message
 from .retail_env import ReplayRetailEnv, is_state_changing_tool
 from .rewards import TAU_STYLE_REWARD_PROFILES, normalize_reward_profile, score_trajectory
 from .schemas import RetailScenario
-from .tracing import weave_op
+from .tracing import bind_weave_to_active_wandb_run, weave_op
+
+
+async def rollout_retail(
+    model: Any,
+    scenario: RetailScenario,
+    *,
+    split: str = "train",
+    temperature: float = 0.8,
+    max_turns: int | None = None,
+    max_completion_tokens: int | None = None,
+    terminate_on_invalid: bool | None = None,
+    request_logprobs: bool = True,
+) -> Any:
+    bind_weave_to_active_wandb_run()
+    return await _rollout_retail_traced(
+        model,
+        scenario,
+        split=split,
+        temperature=temperature,
+        max_turns=max_turns,
+        max_completion_tokens=max_completion_tokens,
+        terminate_on_invalid=terminate_on_invalid,
+        request_logprobs=request_logprobs,
+    )
 
 
 @weave_op("rollout_retail")
-async def rollout_retail(
+async def _rollout_retail_traced(
     model: Any,
     scenario: RetailScenario,
     *,

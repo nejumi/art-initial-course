@@ -1,0 +1,28 @@
+# Retail ART workshop config.
+#
+# In normal workshops, edit only this file.
+# The detailed SFT/RL/vLLM settings are in base_config.yaml.
+# W&B, Weave, OpenAI, and other secrets belong in .env, not here.
+
+# Default workshop run. For the full validated run, change this to:
+#   validated_h100
+run_profile: workshop_fast_h100
+
+# Model size.
+#   standard  -> LiquidAI/LFM2.5-8B-A1B, validated H100 path
+#   tiny      -> Qwen/Qwen3-0.6B, quick setup checks on small GPUs
+#   custom    -> use the base_model value below
+model_profile: standard
+base_model:
+
+# GPU memory preset.
+#   standard -> default H100 classroom settings
+#   low      -> lower vLLM memory pressure for constrained GPUs
+gpu_memory_preset: standard
+
+# Optional advanced overrides. Leave this empty unless the instructor asks.
+# Keys here use the CLI spelling with underscores, for example:
+#   rl_steps: 1
+#   eval_limit: 4
+#   vllm_gpu_memory_utilization: 0.55
+overrides: {}

@@ -12,25 +12,28 @@ from pathlib import Path
 
 from course.shared.config import config_from_env
 from course.shared.data import read_jsonl
-from course.shared.wandb_artifacts import artifact_with_alias
+from course.shared.wandb_artifacts import artifact_with_alias, ensure_wandb_run, finish_wandb_run
 
 
 METRIC_KEYS = [
     "reward",
     "course_eval_score",
-    "outcome_pass_at_k",
-    "task_pass_at_k",
+    "retail_task_pass_at_k",
+    "proxy_tau2_pass_at_k",
+    "reference_tool_sequence_pass_at_k",
     "reward_std_by_scenario",
+    "tau2_official_success",
     "tau2_official_reward",
     "tau2_db_success",
     "tau2_communicate_success",
+    "tau2_nl_assertion_success",
     "tau2_action_match",
     "tau2_read_action_match",
     "tau2_write_action_match",
     "tau2_terminated_cleanly",
-    "outcome_success",
-    "proxy_outcome_success",
-    "task_success",
+    "retail_task_success",
+    "proxy_tau2_success",
+    "reference_tool_sequence_exact_match",
     "communication_success",
     "tool_sequence_success",
     "tool_name_f1",
@@ -92,15 +95,18 @@ METRIC_KEYS = [
 DELTA_KEYS = [
     "reward",
     "course_eval_score",
-    "outcome_pass_at_k",
-    "task_pass_at_k",
+    "retail_task_pass_at_k",
+    "proxy_tau2_pass_at_k",
+    "reference_tool_sequence_pass_at_k",
+    "tau2_official_success",
     "tau2_official_reward",
     "tau2_db_success",
     "tau2_communicate_success",
+    "tau2_nl_assertion_success",
     "tau2_write_action_match",
-    "outcome_success",
-    "proxy_outcome_success",
-    "task_success",
+    "retail_task_success",
+    "proxy_tau2_success",
+    "reference_tool_sequence_exact_match",
     "state_action_sequence_match",
     "accepted_state_action_jump",
     "communication_success",
@@ -112,11 +118,10 @@ DELTA_KEYS = [
 COMPACT_METRIC_KEYS = [
     "reward",
     "course_eval_score",
-    "outcome_success",
-    "proxy_outcome_success",
-    "task_success",
-    "outcome_pass_at_k",
-    "task_pass_at_k",
+    "retail_task_success",
+    "reference_tool_sequence_exact_match",
+    "retail_task_pass_at_k",
+    "reference_tool_sequence_pass_at_k",
     "state_action_sequence_match",
     "communication_success",
     "tool_name_f1",
@@ -129,8 +134,8 @@ COMPACT_METRIC_KEYS = [
 COMPACT_DELTA_KEYS = [
     "reward",
     "course_eval_score",
-    "outcome_success",
-    "task_success",
+    "retail_task_success",
+    "reference_tool_sequence_exact_match",
     "state_action_sequence_match",
     "communication_success",
     "bad_state_action",
@@ -145,6 +150,17 @@ def mean(values: list[float]) -> float:
 def numeric(value: object) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
+    return None
+
+
+def metric_float(metrics: dict[str, object], *keys: str) -> float | None:
+    for key in keys:
+        try:
+            value = metrics.get(key)
+            if value is not None:
+                return float(value)
+        except Exception:
+            pass
     return None
 
 
@@ -189,12 +205,14 @@ def summarize(
     if reward_values:
         summary["reward"] = mean(reward_values)
     if by_scenario:
-        outcome_pass = []
-        task_pass = []
+        retail_task_pass = []
+        proxy_tau2_pass = []
+        reference_path_pass = []
         reward_stds = []
         for scenario_rows in by_scenario.values():
-            outcome_values = []
-            task_values = []
+            retail_task_values = []
+            proxy_tau2_values = []
+            reference_path_values = []
             scenario_rewards = []
             for row in scenario_rows:
                 try:
@@ -202,26 +220,58 @@ def summarize(
                 except Exception:
                     pass
                 row_metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
-                for key, target in (("outcome_success", outcome_values), ("task_success", task_values)):
-                    try:
-                        target.append(float(row_metrics.get(key)))  # type: ignore[union-attr]
-                    except Exception:
-                        pass
-            if outcome_values:
-                outcome_pass.append(max(outcome_values))
-            if task_values:
-                task_pass.append(max(task_values))
+                retail_value = metric_float(
+                    row_metrics,
+                    "retail_task_success",
+                    "proxy_tau2_success",
+                    "outcome_success",
+                )
+                proxy_value = metric_float(row_metrics, "proxy_tau2_success", "outcome_success")
+                reference_value = metric_float(
+                    row_metrics,
+                    "reference_tool_sequence_exact_match",
+                    "task_success",
+                )
+                if retail_value is not None:
+                    retail_task_values.append(retail_value)
+                if proxy_value is not None:
+                    proxy_tau2_values.append(proxy_value)
+                if reference_value is not None:
+                    reference_path_values.append(reference_value)
+            if retail_task_values:
+                retail_task_pass.append(max(retail_task_values))
+            if proxy_tau2_values:
+                proxy_tau2_pass.append(max(proxy_tau2_values))
+            if reference_path_values:
+                reference_path_pass.append(max(reference_path_values))
             if len(scenario_rewards) >= 2:
                 reward_stds.append(statistics.pstdev(scenario_rewards))
-        if outcome_pass:
-            summary["outcome_pass_at_k"] = mean(outcome_pass)
-        if task_pass:
-            summary["task_pass_at_k"] = mean(task_pass)
+        if retail_task_pass:
+            summary["retail_task_pass_at_k"] = mean(retail_task_pass)
+        if proxy_tau2_pass:
+            summary["proxy_tau2_pass_at_k"] = mean(proxy_tau2_pass)
+        if reference_path_pass:
+            summary["reference_tool_sequence_pass_at_k"] = mean(reference_path_pass)
         if reward_stds:
             summary["reward_std_by_scenario"] = mean(reward_stds)
     for key, values in metrics.items():
         if values:
             summary[key] = mean(values)
+    if "retail_task_success" not in summary:
+        if "proxy_tau2_success" in summary:
+            summary["retail_task_success"] = summary["proxy_tau2_success"]
+        elif "outcome_success" in summary:
+            summary["retail_task_success"] = summary["outcome_success"]
+    if "proxy_tau2_success" not in summary and "outcome_success" in summary:
+        summary["proxy_tau2_success"] = summary["outcome_success"]
+    if "proxy_tau2_success" not in summary and "retail_task_success" in summary:
+        summary["proxy_tau2_success"] = summary["retail_task_success"]
+    if "retail_task_pass_at_k" not in summary and "proxy_tau2_pass_at_k" in summary:
+        summary["retail_task_pass_at_k"] = summary["proxy_tau2_pass_at_k"]
+    if "reference_tool_sequence_exact_match" not in summary and "task_success" in summary:
+        summary["reference_tool_sequence_exact_match"] = summary["task_success"]
+    if "tau2_official_success" not in summary and "tau2_official_reward" in summary:
+        summary["tau2_official_success"] = summary["tau2_official_reward"]
     return summary
 
 
@@ -334,7 +384,6 @@ def main() -> None:
     parser.add_argument("--output-csv", default=None, help="Optional full horizontal CSV report path.")
     parser.add_argument("--output-compact-csv", default=None, help="Optional compact horizontal CSV report path.")
     parser.add_argument("--wandb", action="store_true", help="Log the comparison table to W&B.")
-    parser.add_argument("--run-name", default="model-stage-eval-comparison")
     parser.add_argument("--reference-index", type=int, default=0, help="0-based stage index used for delta columns.")
     args = parser.parse_args()
     cfg = config_from_env()
@@ -396,12 +445,11 @@ def main() -> None:
     if args.wandb:
         import wandb
 
-        run = wandb.init(
-            entity=cfg.entity,
-            project=cfg.project,
-            name=args.run_name,
-            job_type="eval-comparison",
-            config={
+        run, owned_run = ensure_wandb_run(cfg, job_type="eval-comparison")
+        if run is None:
+            raise SystemExit("W&B is disabled or unavailable; cannot log comparison table.")
+        run.config.update(
+            {
                 "paths": args.paths,
                 "model_name": cfg.model_name,
                 "model": default_model,
@@ -412,6 +460,7 @@ def main() -> None:
                 "reference_index": args.reference_index,
                 "reference_stage": str(summaries[args.reference_index].get("stage")),
             },
+            allow_val_change=True,
         )
         if args.data_artifact:
             run.use_artifact(artifact_with_alias(args.data_artifact), type="dataset")
@@ -454,7 +503,7 @@ def main() -> None:
                     run.summary[f"{stage}/delta_{key}"] = delta
             table.add_data(*row_values)
         run.log({"model_stage_eval_comparison": table})
-        run.finish()
+        finish_wandb_run(run, owned_run)
 
 
 if __name__ == "__main__":

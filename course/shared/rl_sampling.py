@@ -17,8 +17,9 @@ def has_reward_signal(group: Any, *, tolerance: float = 1e-9) -> bool:
 
 
 AGENTIC_SIGNAL_KEYS = [
-    "outcome_success",
-    "task_success",
+    "retail_task_success",
+    "proxy_tau2_success",
+    "reference_tool_sequence_exact_match",
     "state_action_sequence_match",
     "valid_state_action_rate",
     "state_action_reached_rate",
@@ -217,6 +218,11 @@ def group_diagnostic_metrics(groups: list[Any], *, prefix: str = "data/step") ->
             lambda trajectories: has_reward_signal(SimpleTrajectoryGroup(trajectories))
             and not has_agentic_signal(SimpleTrajectoryGroup(trajectories)),
         ),
+        f"{prefix}_retail_task_success_mixed_group_rate": _mixed_success_rate(groups, "retail_task_success"),
+        f"{prefix}_proxy_tau2_success_mixed_group_rate": _mixed_success_rate(groups, "proxy_tau2_success"),
+        f"{prefix}_reference_tool_sequence_mixed_group_rate": _mixed_success_rate(
+            groups, "reference_tool_sequence_exact_match"
+        ),
         f"{prefix}_outcome_success_mixed_group_rate": _mixed_success_rate(groups, "outcome_success"),
         f"{prefix}_task_success_mixed_group_rate": _mixed_success_rate(groups, "task_success"),
         f"{prefix}_mixed_state_action_sequence_group_rate": _mixed_metric_rate(
@@ -241,6 +247,9 @@ def group_diagnostic_metrics(groups: list[Any], *, prefix: str = "data/step") ->
         ),
     }
     for key in [
+        "retail_task_success",
+        "proxy_tau2_success",
+        "reference_tool_sequence_exact_match",
         "outcome_success",
         "task_success",
         "state_action_match",
@@ -271,8 +280,14 @@ def reward_signal_metrics(groups: list[Any], *, prefix: str = "data/step") -> di
         f"{prefix}_reward_std_mean": mean(
             [sample_std(group_rewards) for group in groups if len(group_rewards := reward_values(group)) >= 2]
         ),
+        f"{prefix}_retail_task_success_mean": mean(metric_values(groups, "retail_task_success")),
         f"{prefix}_outcome_success_mean": mean(metric_values(groups, "outcome_success")),
+        f"{prefix}_proxy_tau2_success_mean": mean(metric_values(groups, "proxy_tau2_success")),
         f"{prefix}_task_success_mean": mean(metric_values(groups, "task_success")),
+        f"{prefix}_strict_replay_task_success_mean": mean(metric_values(groups, "strict_replay_task_success")),
+        f"{prefix}_reference_tool_sequence_exact_match_mean": mean(
+            metric_values(groups, "reference_tool_sequence_exact_match")
+        ),
         f"{prefix}_state_action_sequence_match_mean": mean(metric_values(groups, "state_action_sequence_match")),
         f"{prefix}_state_action_reached_rate_mean": mean(metric_values(groups, "state_action_reached_rate")),
         f"{prefix}_state_action_attempt_rate_mean": mean(metric_values(groups, "state_action_attempt_rate")),
@@ -287,8 +302,8 @@ def reward_signal_metrics(groups: list[Any], *, prefix: str = "data/step") -> di
         f"{prefix}_terminated_on_invalid_mean": mean(metric_values(groups, "terminated_on_invalid")),
     }
     course_score_parts = [
-        metrics[f"{prefix}_outcome_success_mean"],
-        0.5 * metrics[f"{prefix}_task_success_mean"],
+        metrics.get(f"{prefix}_retail_task_success_mean", metrics[f"{prefix}_proxy_tau2_success_mean"]),
+        0.5 * metrics[f"{prefix}_reference_tool_sequence_exact_match_mean"],
         0.5 * metrics[f"{prefix}_state_action_sequence_match_mean"],
         0.25 * metrics[f"{prefix}_valid_state_action_rate_mean"],
         0.10 * metrics[f"{prefix}_communication_success_mean"],

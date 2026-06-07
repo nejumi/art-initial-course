@@ -6,13 +6,14 @@ For benchmark-grade reporting, use the official tau2 runtime as a separate evalu
 
 ## Why This Exists
 
-Official tau2 retail scoring uses the task `reward_basis`. For retail, airline, and telecom, the default basis is `DB * COMMUNICATE`.
+Official tau2 retail scoring uses each task's `reward_basis`. The tau2 docs describe `DB` and `COMMUNICATE` as the default contract for text domains, while the current retail task files in the Sierra repository commonly use `DB` together with `NL_ASSERTION`. Inspect `evaluation_criteria.reward_basis` for the exact task set you run.
 
 - `DB` checks whether the final predicted DB hash matches the gold DB hash.
 - `COMMUNICATE` checks whether required strings were communicated.
+- `NL_ASSERTION` checks task-specific natural-language conditions with a judge model.
 - `evaluation_criteria.actions` is a reference trajectory used to derive the gold DB state. It is not the only valid path unless `ACTION` is explicitly in `reward_basis`.
 
-The course proxy metrics such as `outcome_success`, `state_action_sequence_match`, and `communication_success` are useful training diagnostics. They should not be presented as official tau2 leaderboard scores.
+The course metric `retail_task_success` is the main hands-on success metric for ART rollouts and checkpoint validation. It is designed for fast local training loops, while official tau2 reporting remains a separate benchmark-grade extension.
 
 ## Retail First, Telecom Later
 
@@ -71,4 +72,4 @@ python course/02_weave_evals/compare_checkpoints.py \
   --wandb
 ```
 
-The imported rows include `tau2_official_reward`, `tau2_db_success`, `tau2_communicate_success`, and diagnostic action-match columns. Use these as a separate evaluation section from the lightweight training proxy.
+The imported rows include `tau2_official_success`, `tau2_db_success`, `tau2_communicate_success`, `tau2_nl_assertion_success`, and diagnostic action-match columns when those components are present in the source result. `tau2_official_reward` is also kept as a compatibility alias for raw tau2 outputs.

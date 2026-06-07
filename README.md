@@ -14,7 +14,7 @@ The code is structured so the early labs can be inspected without a GPU. Local A
 
 ## Open Training Data
 
-The course intentionally uses public datasets so a workshop can run end to end without private task data.
+The course uses public datasets so the labs can run end to end without private task data.
 
 | Dataset | Main use | Why it is useful | Course handling |
 | --- | --- | --- | --- |
@@ -32,18 +32,27 @@ The hands-on task is a retail customer-support agent. A user asks for help with 
 
 The bridge curriculum intentionally keeps the first RL lab short: most examples have one consequential state-changing action. That makes the class focus on the core agentic loop: read state, decide policy, mutate state correctly, and communicate.
 
-Do not confuse experiment labels with metrics:
+Experiment labels and evaluation metrics are separate:
 
 | Term | Type | Meaning |
 | --- | --- | --- |
 | `bridge-only` | Experiment condition | SFT uses only local bridge next-action rows. |
 | `teacher mix` | Experiment condition | SFT mixes bridge rows with public scored teacher next-action rows. |
 | `success mix` | Experiment condition | SFT mixes bridge rows with successful public tau2 retail traces converted to next-action rows. |
-| `task_success` | Metric | Strict exact reference tool-call sequence success with no invalid tool call. Useful for diagnosing trace imitation, but stricter than tau-style outcome scoring. |
-| `outcome_success` / `proxy_outcome_success` | Metric | Lightweight tau-style proxy: correct state-changing action sequence, successful communication, no bad/missing/invalid state action, and no truncation. |
+| `retail_task_success` | Metric | Primary course success signal: the agent performs the required state-changing mutation, communicates the outcome, avoids invalid actions, and finishes cleanly. |
+| `reference_tool_sequence_exact_match` | Metric | Whether the model called the same tools in the same order as the reference solution. This measures reference-path imitation; a different valid tool path can still solve the task. |
 | `reward` | Metric | The configured reward profile, usually `tau_irc`: weighted outcome, state-action, argument, communication, and penalty terms. |
 
-For workshop reporting, keep data lineage and split hygiene explicit. Every mixed SFT row carries source metadata, and data artifacts include generated summaries so instructors can check which source IDs entered training. Do not present official tau2 numbers for an eval task set that may overlap with public teacher or success-trace SFT rows; use those runs as training-proxy demos unless the held-out task IDs have been audited.
+The main course metric is `retail_task_success`. It follows the outcome-oriented spirit of tau-style evaluation while staying light enough to use inside ART rollouts: read-only tool order is diagnostic, while consequential state-changing mutations and final user communication drive the success signal. Official tau2 evaluation is available as an optional final check when a benchmark-grade runtime comparison is needed.
+
+Evaluation has two classroom-facing levels:
+
+| Context | Environment | Metric | Purpose |
+| --- | --- | --- | --- |
+| Training rollouts | Lightweight local retail environment | `data/step_retail_task_success_mean` | Fast on-policy feedback during GRPO/GSPO/RULER. |
+| Checkpoint validation | Held-out scenarios in the same lightweight environment | `retail_task_success` | Fast comparison of baseline, SFT, and RL checkpoints. |
+
+Data artifacts keep source metadata so training rows and validation rows can be checked separately.
 
 ## Quick Start
 
@@ -52,7 +61,8 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 cp .env.example .env
-# Edit .env with your W&B/OpenAI keys and model profile.
+# Edit .env with your W&B/OpenAI keys.
+# Edit course/09_runbooks/config.yaml for run scale, model size, and GPU memory.
 
 python course/00_setup/env_check.py
 python course/00_setup/art_api_smoke.py
@@ -61,6 +71,27 @@ python course/03_sft_warmup/make_sft_jsonl.py --limit 200
 python course/03_sft_warmup/make_next_action_sft_jsonl.py --data-dir data/retail
 python course/01_art_primitives/dry_run_rollout.py --limit 3
 ```
+
+Workshop run settings live in [`course/09_runbooks/config.yaml`](course/09_runbooks/config.yaml). This file is the participant-facing control surface:
+
+```yaml
+run_profile: workshop_fast_h100
+model_profile: standard
+gpu_memory_preset: standard
+overrides: {}
+```
+
+The default `run_profile` is the workshop-sized SFT -> GRPO path. For a full validation run, change it to `validated_h100`. Use `model_profile: tiny` for constrained hardware checks, or `gpu_memory_preset: low` to lower vLLM memory pressure. Detailed profile definitions are in [`course/09_runbooks/base_config.yaml`](course/09_runbooks/base_config.yaml).
+
+You can also choose a profile from the CLI:
+
+```bash
+python course/09_runbooks/run_retail_agentic_sequence.py --run-profile smoke_tiny
+python course/09_runbooks/run_retail_agentic_sequence.py --run-profile workshop_fast_h100
+python course/09_runbooks/run_retail_agentic_sequence.py --run-profile validated_h100
+```
+
+For the workshop runbook, `config.yaml` is the source of truth for run scale, model size, and GPU memory. `.env` is for account/project credentials and runtime secrets.
 
 Bridge curriculum option for a shorter first RL lab:
 
@@ -76,7 +107,7 @@ python course/07_models_registry_weave/log_data_artifacts.py \
   --artifact-name retail-course-data-bridge-state1
 ```
 
-Instructor runbook for a full local-H100 validation pass:
+Full local GPU runbook:
 
 ```bash
 python course/09_runbooks/run_retail_agentic_sequence.py \
@@ -112,7 +143,7 @@ python course/09_runbooks/run_retail_agentic_sequence.py \
   --rl-algos grpo,gspo
 ```
 
-For a research-aligned instructor validation pass, mix public teacher rows, AReaL tau2 SFT rows, and successful tau2 retail traces:
+Full validation run with public teacher rows, AReaL tau2 SFT rows, and successful tau2 retail traces:
 
 ```bash
 python course/09_runbooks/run_retail_agentic_sequence.py \
@@ -135,17 +166,20 @@ python course/09_runbooks/run_retail_agentic_sequence.py \
   --rl-algos grpo,gspo,ruler
 ```
 
-The runbook defaults to `--continue-on-invalid` for tau-style RL. Unexpected state-changing actions are still penalized, but rollouts continue long enough for final state/action and communication rewards to be observed. Use `--no-continue-on-invalid` only when demonstrating strict replay failure modes.
-For tau-inspired profiles, the lightweight replay environment also defaults to `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS=true`: a single exact reference state-changing action can skip preceding read-only replay turns, while wrong state-changing names or arguments still count as bad state actions. This keeps the hands-on proxy closer to tau-style outcome scoring without requiring the full tau2 runtime.
-For the final course report, add stochastic validation with `--eval-rollouts-per-scenario 4 --eval-temperature 0.2` so `outcome_pass_at_k`, `task_pass_at_k`, and reward variance columns are meaningful. Keep the default deterministic eval for quick instructor checks.
+The runbook defaults to `--continue-on-invalid` for tau-style RL. Unexpected state-changing actions are still penalized, but rollouts continue long enough for final state/action and communication rewards to be observed. Use `--no-continue-on-invalid` to study exact reference-path failure modes.
+For tau-inspired profiles, the lightweight replay environment also defaults to `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS=true`: a single exact reference state-changing action can skip preceding read-only replay turns, while wrong state-changing names or arguments still count as bad state actions. This keeps `retail_task_success` focused on consequential outcomes without requiring the full tau2 runtime.
+For stochastic validation, add `--eval-rollouts-per-scenario 4 --eval-temperature 0.2` so `outcome_pass_at_k`, `task_pass_at_k`, and reward variance columns are meaningful. Deterministic eval remains available for quick regression checks.
 
 On a Slurm H100 cluster, the same flow can be launched with:
 
 ```bash
-sbatch course/09_runbooks/sunk_h100_retail_agentic_sequence.sbatch
+sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  validated_h100
 ```
 
-For the full instructor validation including RULER, pass `grpo,gspo,ruler` as the `RL_ALGOS` argument. RULER uses an external judge model, so keep it in instructor or enterprise validation runs unless the workshop budget explicitly includes judge calls.
+To include RULER in an advanced run, set `overrides: {rl_algos: "grpo,gspo,ruler"}` or create an instructor profile in `base_config.yaml`. RULER uses an external judge model, so plan for the extra judge calls.
 
 Advanced SFT data option:
 
@@ -195,7 +229,6 @@ To run ART training, configure W&B and a local GPU environment:
 ```bash
 export WANDB_ENTITY=<entity>
 export WANDB_PROJECT=openpipe-art-retail
-export ART_MODEL_PROFILE=standard
 export OPENAI_API_KEY=<optional-for-external-baseline>
 
 python course/07_models_registry_weave/log_data_artifacts.py --data-dir data/retail
@@ -231,8 +264,10 @@ Training scripts use W&B Artifacts and Weave Evaluations for lineage:
 - SFT logs the latest local ART LoRA checkpoint as `<ART_MODEL_NAME>-checkpoint:sft-anchor`, including the exact `sft_file` and `sft_mask_mode` in checkpoint metadata.
 - GRPO, GSPO, and RULER runs call `use_artifact` on the SFT checkpoint and log their own branch checkpoint artifacts.
 - Eval runs can call `use_artifact` on both the dataset and the evaluated checkpoint, while Weave stores rollout traces.
-- After checkpoint comparison, the runbook publishes each cached JSONL result as a Weave Evaluation using the same scorer set, so instructors can inspect both trace-level behavior and stage-level eval summaries without rerunning rollouts.
+- After checkpoint comparison, the runbook publishes each cached JSONL result as a Weave Evaluation using the same scorer set, so trace-level behavior and stage-level eval summaries can be inspected without rerunning rollouts.
 - `course/07_models_registry_weave/inspect_wandb_lineage.py` can verify artifact aliases, metadata, and logged/used relationships with the W&B Public API after a full run.
+- Run IDs and run names are generated by W&B. Course scripts put stage identity into run tags such as `stage:sft-train`, `kind:training`, `algo:grpo`, `split:validation`, `profile:validated_h100`, and `reward:tau_irc_balanced`; notes and config hold the base model, ART model, dataset, run slug, and Weave project.
+- When Weave tracing is enabled, the Weave client is explicitly bound to the active W&B-generated `run.id`, so traces and cached Evaluations can be read from the same experiment context as metrics and artifacts.
 
 When a long RL run peaks before the final step, log the stable intermediate checkpoint without moving the mutable `latest` alias:
 
@@ -263,54 +298,72 @@ python course/08_enterprise_ops/fork_checkpoint.py \
 
 Reward and SFT data design notes: [course/04_grpo_local/reward_and_sft_design_notes.md](course/04_grpo_local/reward_and_sft_design_notes.md).
 
-Official tau2 evaluation bridge: [course/02_weave_evals/official_tau2_eval_bridge.md](course/02_weave_evals/official_tau2_eval_bridge.md). Use this when you need benchmark-grade `DB * COMMUNICATE` scores in addition to the lightweight training proxy.
+Official tau2 evaluation bridge: [course/02_weave_evals/official_tau2_eval_bridge.md](course/02_weave_evals/official_tau2_eval_bridge.md). Use this only when you need a benchmark-grade runtime comparison in addition to the course success metric.
+
+## Validated Course Result
+
+The validated H100 path uses `LiquidAI/LFM2.5-8B-A1B`, bridge next-action rows, public teacher next-action rows, last-assistant SFT masking, and short GRPO from the SFT anchor. The selected RL checkpoint is chosen by fresh held-out validation, not by assuming the latest training step is best.
+
+Held-out checkpoint validation from the current course recipe:
+
+| Stage | `retail_task_success` | `state_action_sequence_match` | `valid_state_action_rate` | `bad_state_action` | `missing_state_action` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 0.160 | 0.160 | 0.160 | 0.480 | 0.840 |
+| SFT anchor | 0.240 | 0.280 | 0.300 | 0.400 | 0.680 |
+| Short GRPO selected checkpoint | 0.280 | 0.360 | 0.360 | 0.160 | 0.640 |
+
+The longer GRPO exploration run reached stronger training-rollout signals but did not improve monotonically on held-out validation. The course therefore treats checkpoint selection as part of the agentic RL workflow: use W&B curves to shortlist candidates, then validate candidate checkpoints on held-out scenarios and inspect Weave traces before choosing a model artifact.
 
 ## Model Selection
 
-The trainable ART model is selected in `course/shared/config.py`.
-Use `ART_MODEL_PROFILE` for common classroom hardware profiles, or `ART_BASE_MODEL` for a direct override.
+For the workshop runbook, choose the trainable ART model in [`course/09_runbooks/config.yaml`](course/09_runbooks/config.yaml):
 
-```bash
-# Constrained local GPU / compatibility smoke tests.
-export ART_MODEL_PROFILE=tiny       # Qwen/Qwen3-0.6B
-
-# Main H100 hands-on path.
-export ART_MODEL_PROFILE=standard   # LiquidAI/LFM2.5-8B-A1B
-
-# OpenPipe/Qwen compatibility path.
-export ART_MODEL_PROFILE=openpipe   # OpenPipe/Qwen3-14B-Instruct
-
-# Larger managed-training discussion/demo.
-export ART_MODEL_PROFILE=moe        # Qwen/Qwen3-30B-A3B-Instruct-2507
-
-# Explicit override always wins.
-export ART_BASE_MODEL=LiquidAI/LFM2.5-1.2B-Instruct
+```yaml
+model_profile: standard   # LiquidAI/LFM2.5-8B-A1B
 ```
 
-`standard` is the validated H100 classroom path. `tiny` is intended to make setup and short smoke tests accessible on smaller machines while staying on an ART-supported Qwen3 dense model path. Use `ART_BASE_MODEL` for direct experiments, then run the setup check and a short SFT/RL smoke run before relying on the model for the full RL lab because ART backend compatibility depends on the architecture, tokenizer, vLLM, tool-call parser, and LoRA trainer path.
+Common values are:
 
-When `ART_BASE_MODEL` points at an LFM2/LFM2.5 model, the course selects `ART_TOOL_CALL_PARSER=lfm2` automatically so vLLM can return model-generated tool calls as OpenAI-compatible `message.tool_calls`. Override `ART_TOOL_CALL_PARSER` only when validating another parser.
+| `model_profile` | Model | Use |
+| --- | --- | --- |
+| `standard` | `LiquidAI/LFM2.5-8B-A1B` | Main H100 workshop path. |
+| `tiny` | `Qwen/Qwen3-0.6B` | Setup checks and constrained GPUs. |
+| `openpipe` | `OpenPipe/Qwen3-14B-Instruct` | OpenPipe/Qwen compatibility path. |
+| `moe` | `Qwen/Qwen3-30B-A3B-Instruct-2507` | Larger managed-training discussion/demo. |
+| `custom` | value from `base_model` | Instructor-led experiments. |
+
+For a direct model override in the runbook:
+
+```yaml
+model_profile: custom
+base_model: LiquidAI/LFM2.5-1.2B-Instruct
+```
+
+`standard` is the validated H100 classroom path. `tiny` is intended to make setup and short smoke tests accessible on smaller machines while staying on an ART-supported Qwen3 dense model path. Run the setup check and a short SFT/RL smoke run before relying on a custom model for the full RL lab because ART backend compatibility depends on the architecture, tokenizer, vLLM, tool-call parser, and LoRA trainer path.
 
 RULER judge selection is separate from the trainable model. It defaults to `openai/gpt-5.5` with medium reasoning effort and can be overridden with `--ruler-judge-model` / `--ruler-judge-effort` in the runbook or `--judge-model` / `--judge-effort` in `course/05_ruler/train_with_ruler.py`.
 
-## Diagnostic H100 Results
+## Evaluation Tables
 
-The table below is retained as an older diagnostic run with strict reference-trajectory scoring. It is not the final expected-results table for the workshop. The course is being refreshed around tau-style outcome metrics (`tau_sparse` / `tau_irc`), where `proxy_outcome_success`, state-changing action correctness, and communication success are the primary training-proxy comparison columns. Official tau2 reporting should use `tau2_official_reward`, `tau2_db_success`, and `tau2_communicate_success` imported from the official runtime.
+Checkpoint comparisons are written as horizontal tables so each row is one model stage and each metric is a separate column. The compact presentation table uses `retail_task_success` as the primary success column.
 
-| Stage | Reward | Task success | Tool F1 | Tool order | Invalid calls avg | Final text F1 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Baseline | 0.5102 | 0.1458 | 0.7268 | 0.5542 | 0.6667 | 0.2439 |
-| SFT anchor, lr=3e-5 | 0.5012 | 0.2083 | 0.7255 | 0.5750 | 0.7708 | 0.2541 |
-| SFT -> GRPO, 8 steps | 0.5165 | 0.1875 | 0.7283 | 0.5740 | 0.6667 | 0.2576 |
-| SFT -> GSPO, 3 steps | 0.5043 | 0.2083 | 0.7268 | 0.5792 | 0.7292 | 0.2405 |
-| SFT -> RULER-GRPO, 3 steps | 0.5026 | 0.1875 | 0.7254 | 0.5750 | 0.7292 | 0.2405 |
+| Column | Meaning |
+| --- | --- |
+| `model` | Base model or checkpoint family. |
+| `stage` | Baseline, SFT, GRPO, GSPO, RULER, or imported official tau2 result. |
+| `model_artifact_path` | W&B Artifact path for the evaluated checkpoint. |
+| `reward` | Mean reward under the selected course reward profile. |
+| `retail_task_success` | Primary course success signal for training rollouts and checkpoint validation. |
+| `tau2_official_success` | Optional official-runtime success imported from tau2 result files. |
+| `reference_tool_sequence_exact_match` | Whether the model followed the same tool path as the reference solution. |
+| `state_action_sequence_match` | Whether required state-changing actions were called correctly. |
+| `communication_success` | Whether the final user-facing response communicates the outcome. |
+| `bad_state_action` / `missing_state_action` | State-changing action errors to inspect in Weave traces. |
 
-Current tau-style diagnostics show that naive full-trajectory SFT on the small curriculum slice does not reliably beat the baseline. The course therefore treats full-trajectory SFT as a teaching baseline and validates next-action SFT before using an SFT checkpoint as the parent for GRPO/GSPO/RULER.
-
-W&B Artifacts are logged for the dataset, the SFT checkpoint, and each RL branch checkpoint. The comparison script logs a horizontal W&B table with columns such as `model`, `stage`, `model_artifact_path`, `reward`, `task_success`, and delta metrics, while Weave stores rollout traces and cached checkpoint Evaluations.
+W&B Artifacts are logged for the dataset, the SFT checkpoint, and each RL branch checkpoint. The comparison script logs a horizontal W&B table with columns such as `model`, `stage`, `model_artifact_path`, `reward`, `retail_task_success`, `reference_tool_sequence_exact_match`, and delta metrics, while Weave stores rollout traces and cached checkpoint Evaluations.
 RL training logs also include signal-quality diagnostics: reward range/std before and after zero-variance filtering, winner-minus-loser gaps for outcome/state-action metrics, state-action attempt/reached rates, and tau-style reward components. These columns are meant to prove that GRPO/GSPO is optimizing agentic behavior rather than noise from read-only replay differences.
 The runbook writes both full audit tables (`checkpoint_eval_comparison.md/.csv`) and compact presentation tables (`checkpoint_eval_summary.md/.csv`).
-It also writes `checkpoint_acceptance.md/.json`. This conservative gate rejects a stage unless SFT preserves baseline task/outcome metrics and each RL branch improves over the SFT parent on reward plus at least one agentic success metric and one state-action error metric. Use the gate as a finalization checklist before copying expected results into this README.
+It also writes `checkpoint_acceptance.md/.json`, which checks that SFT preserves baseline success signals and that each RL branch improves over the SFT parent on reward plus agentic success and state-action error metrics.
 
 ## Lab Map
 

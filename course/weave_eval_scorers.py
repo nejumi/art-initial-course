@@ -10,12 +10,19 @@ def _metric(output: dict[str, Any], name: str, default: float = 0.0) -> float:
         return default
 
 
-@weave_op("task_success_scorer")
-def task_success_scorer(output: dict[str, Any], **_: Any) -> dict[str, float]:
+@weave_op("retail_success_scorer")
+def retail_success_scorer(output: dict[str, Any], **_: Any) -> dict[str, float]:
     return {
-        "outcome_success": _metric(output, "outcome_success"),
-        "proxy_outcome_success": _metric(output, "proxy_outcome_success", _metric(output, "outcome_success")),
-        "task_success": _metric(output, "task_success"),
+        "retail_task_success": _metric(
+            output,
+            "retail_task_success",
+            _metric(output, "proxy_tau2_success", _metric(output, "outcome_success")),
+        ),
+        "reference_tool_sequence_exact_match": _metric(
+            output,
+            "reference_tool_sequence_exact_match",
+            _metric(output, "task_success"),
+        ),
         "communication_success": _metric(output, "communication_success"),
     }
 
@@ -78,4 +85,4 @@ def response_quality_scorer(output: dict[str, Any], **_: Any) -> dict[str, float
     }
 
 
-SCORERS = [task_success_scorer, tool_quality_scorer, agentic_signal_scorer, response_quality_scorer]
+SCORERS = [retail_success_scorer, tool_quality_scorer, agentic_signal_scorer, response_quality_scorer]

@@ -8,6 +8,7 @@ import argparse
 from pathlib import Path
 
 from course.shared.config import config_from_env
+from course.shared.wandb_artifacts import ensure_wandb_run, finish_wandb_run
 
 
 def main() -> None:
@@ -24,13 +25,15 @@ def main() -> None:
 
     import wandb
 
-    run = wandb.init(project=cfg.project, entity=cfg.entity, job_type="upload-lora")
+    run, owned_run = ensure_wandb_run(cfg, job_type="upload-lora")
+    if run is None:
+        raise SystemExit("W&B is disabled or unavailable; cannot upload artifact.")
     artifact_name = args.artifact_name or f"{cfg.model_name}-lora"
     artifact = wandb.Artifact(artifact_name, type=args.type)
     artifact.add_dir(str(checkpoint))
     artifact.metadata.update({"task": "retail-support-agent", "base_model": cfg.base_model})
     run.log_artifact(artifact)
-    run.finish()
+    finish_wandb_run(run, owned_run)
     print("Uploaded artifact:", artifact_name)
 
 

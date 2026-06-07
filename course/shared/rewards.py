@@ -390,8 +390,13 @@ def score_messages(
             - 0.30 * (1.0 if truncated_by_max_turn else 0.0)
         ),
         "task_success": task_success,
+        "strict_replay_task_success": task_success,
+        "reference_tool_sequence_exact_match": task_success,
+        "reference_path_exact_match": task_success,
+        "retail_task_success": outcome_success,
         "outcome_success": outcome_success,
         "proxy_outcome_success": outcome_success,
+        "proxy_tau2_success": outcome_success,
         "tool_sequence_success": tool_sequence_success,
         "tool_name_f1": f1,
         "tool_order_match": order,

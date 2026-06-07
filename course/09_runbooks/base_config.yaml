@@ -1,0 +1,236 @@
+# Detailed run profiles for course/09_runbooks/run_retail_agentic_sequence.py.
+#
+# Workshop participants normally do not need this file. Use config.yaml for the
+# small set of settings that should be changed during a workshop.
+
+gpu_memory_presets:
+  standard: {}
+  low:
+    vllm_gpu_memory_utilization: 0.55
+    vllm_max_model_len: 8192
+    vllm_max_num_batched_tokens: 8192
+    vllm_max_num_seqs: 4
+
+profiles:
+  no_gpu_walkthrough:
+    description: Print the full command sequence without launching training.
+    args:
+      run_slug: retail-no-gpu-walkthrough
+      dry_run: true
+      no_weave: true
+      no_wandb_compare: true
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_rl: true
+      skip_compare: true
+
+  smoke_tiny:
+    description: Minimal local-GPU smoke run for setup validation on constrained hardware.
+    args:
+      base_model: Qwen/Qwen3-0.6B
+      run_slug: qwen3-06b-retail-smoke
+      data_dir: .art/curriculum_data/retail_bridge_state1_smoke
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-smoke
+      build_bridge: true
+      bridge_max_per_task: 1
+      eval_limit: 4
+      sft_max_steps: 8
+      sft_chunk_size_batches: 4
+      sft_peak_lr: 0.00001
+      rl_algos: grpo
+      rl_suffix: smoke-grpo-s1-g2-r2
+      rl_train_limit: 4
+      rl_steps: 1
+      rl_groups_per_step: 2
+      rl_rollouts_per_scenario: 2
+      rl_learning_rate: 0.000002
+      max_completion_tokens: 256
+      art_seq_length: 8192
+      vllm_gpu_memory_utilization: 0.6
+      vllm_max_model_len: 8192
+      vllm_max_num_batched_tokens: 8192
+      vllm_max_num_seqs: 4
+      skip_weave_cached_evals: true
+
+  workshop_fast_h100:
+    description: Short H100 hands-on run that shows the complete SFT -> GRPO workflow.
+    args:
+      run_slug: lfm25-8b-a1b-retail-workshop-fast
+      data_dir: .art/curriculum_data/retail_bridge_state1_workshop_fast
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-workshop-fast
+      build_bridge: true
+      bridge_max_per_task: 2
+      include_teacher_sft: true
+      teacher_sft_limit: 256
+      eval_limit: 8
+      sft_max_steps: 48
+      sft_chunk_size_batches: 8
+      sft_peak_lr: 0.00001
+      rl_algos: grpo
+      rl_suffix: fast-balanced-s2-g4-r4
+      reward_profile: tau_irc_balanced
+      rl_train_limit: 12
+      rl_steps: 2
+      rl_groups_per_step: 4
+      rl_rollouts_per_scenario: 4
+      rl_learning_rate: 0.000001
+      max_completion_tokens: 512
+      art_seq_length: 12288
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 12288
+      vllm_max_num_batched_tokens: 12288
+      vllm_max_num_seqs: 8
+
+  workshop_standard_h100:
+    description: Longer single-GPU classroom run for visible W&B curves without waiting for full validation.
+    args:
+      run_slug: lfm25-8b-a1b-retail-workshop-standard
+      data_dir: .art/curriculum_data/retail_bridge_state1_workshop_standard
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-workshop-standard
+      build_bridge: true
+      bridge_max_per_task: 2
+      include_teacher_sft: true
+      teacher_sft_limit: 512
+      eval_limit: 12
+      sft_max_steps: 96
+      sft_chunk_size_batches: 12
+      sft_peak_lr: 0.00001
+      rl_algos: grpo
+      rl_suffix: standard-balanced-s6-g4-r4
+      reward_profile: tau_irc_balanced
+      rl_train_limit: 24
+      rl_steps: 6
+      rl_groups_per_step: 4
+      rl_rollouts_per_scenario: 4
+      rl_learning_rate: 0.000001
+      max_completion_tokens: 512
+      art_seq_length: 12288
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 12288
+      vllm_max_num_batched_tokens: 12288
+      vllm_max_num_seqs: 8
+
+  validated_h100:
+    description: "Validated LFM2.5 8B course profile: teacher-mix SFT followed by short GRPO."
+    args:
+      run_slug: lfm25-8b-a1b-retail-validated
+      data_dir: .art/curriculum_data/retail_bridge_state1_validated
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-validated
+      build_bridge: true
+      bridge_max_per_task: 2
+      include_teacher_sft: true
+      teacher_sft_limit: 512
+      eval_limit: 25
+      sft_max_steps: 180
+      sft_chunk_size_batches: 12
+      sft_peak_lr: 0.00001
+      rl_algos: grpo
+      rl_suffix: validated-balanced-s2-g8-r8
+      reward_profile: tau_irc_balanced
+      rl_train_limit: 48
+      rl_steps: 2
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_learning_rate: 0.000001
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  validated_long_h100:
+    description: Longer GRPO validation profile for checkpoint-selection demonstrations.
+    args:
+      run_slug: lfm25-8b-a1b-retail-validated-long
+      data_dir: .art/curriculum_data/retail_bridge_state1_validated_long
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-validated-long
+      build_bridge: true
+      bridge_max_per_task: 2
+      include_teacher_sft: true
+      teacher_sft_limit: 512
+      eval_limit: 25
+      sft_max_steps: 180
+      sft_chunk_size_batches: 12
+      sft_peak_lr: 0.00001
+      rl_algos: grpo
+      rl_suffix: validated-long-balanced-s18-g8-r8
+      reward_profile: tau_irc_balanced
+      rl_train_limit: 48
+      rl_steps: 18
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_learning_rate: 0.000001
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  validated_sft_heavy_h100:
+    description: SFT-heavy validation profile for offline comparison after the main validated run.
+    args:
+      run_slug: lfm25-8b-a1b-retail-validated-sft-heavy
+      data_dir: .art/curriculum_data/retail_bridge_state1_validated_sft_heavy
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-validated-sft-heavy
+      build_bridge: true
+      bridge_max_per_task: 2
+      include_teacher_sft: true
+      teacher_sft_limit: 1024
+      include_success_trace_sft: true
+      success_trace_sft_limit: 512
+      eval_limit: 25
+      sft_max_steps: 512
+      sft_chunk_size_batches: 16
+      sft_peak_lr: 0.00001
+      rl_algos: grpo
+      rl_suffix: sft-heavy-balanced-s18-g8-r8
+      reward_profile: tau_irc_balanced
+      rl_train_limit: 48
+      rl_steps: 18
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_learning_rate: 0.000001
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  long_ablation_h100:
+    description: Long ablation profile for offline experimentation; not intended for live hands-on delivery.
+    args:
+      run_slug: lfm25-8b-a1b-retail-long-ablation
+      data_dir: .art/curriculum_data/retail_bridge_state1_long_ablation
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-long-ablation
+      build_bridge: true
+      bridge_max_per_task: 2
+      include_teacher_sft: true
+      teacher_sft_limit: 512
+      eval_limit: 25
+      sft_max_steps: 180
+      sft_chunk_size_batches: 12
+      sft_peak_lr: 0.00001
+      rl_algos: grpo
+      rl_suffix: long-tauirc-s48-g8-r8
+      reward_profile: tau_irc
+      rl_train_limit: 52
+      rl_steps: 48
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_learning_rate: 0.000001
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8

@@ -16,6 +16,7 @@ from course.shared.data import load_cached_split, scenarios_from_records, write_
 from course.shared.rewards import REWARD_PROFILES
 from course.shared.rollout import rollout_retail
 from course.shared.tracing import init_weave, weave_op
+from course.shared.wandb_artifacts import ensure_wandb_run
 from course.shared.schemas import RetailScenario
 
 @weave_op("predict_retail_baseline")
@@ -58,7 +59,10 @@ async def main_async() -> None:
     model = make_prompted_model(cfg, name="prompted-retail-baseline")
 
     if args.weave_evaluation:
-        init_weave(cfg.project)
+        os.environ.setdefault("COURSE_RUN_STAGE", "prompted-baseline-eval")
+        os.environ.setdefault("COURSE_RUN_KIND", "eval")
+        ensure_wandb_run(cfg, job_type="weave-eval")
+        init_weave()
         import weave
         from course.weave_eval_scorers import SCORERS as scorers
         rows = [{"scenario_dict": scenario.to_dict()} for scenario in scenarios]

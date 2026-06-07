@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import argparse
 
 from course.shared.config import config_from_env
+from course.shared.wandb_artifacts import ensure_wandb_run, finish_wandb_run
 
 
 def main() -> None:
@@ -17,13 +18,13 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = config_from_env()
-    import wandb
-
-    run = wandb.init(project=cfg.project, entity=cfg.entity, job_type="registry-link")
+    run, owned_run = ensure_wandb_run(cfg, job_type="registry-link")
+    if run is None:
+        raise SystemExit("W&B is disabled or unavailable; cannot link registry artifact.")
     artifact = run.use_artifact(args.artifact)
     target = f"wandb-registry-Model/{args.collection}"
     run.link_artifact(artifact, target_path=target, aliases=[args.alias])
-    run.finish()
+    finish_wandb_run(run, owned_run)
     print(f"Linked {args.artifact} to {target} with alias {args.alias}")
 
 

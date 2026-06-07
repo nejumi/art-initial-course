@@ -474,7 +474,7 @@ class RetailRewardInvariantTests(unittest.TestCase):
         decision = stage_acceptance.judge_rl(rl, sft, criteria)
 
         self.assertEqual(decision["decision"], "reject")
-        self.assertIn("no outcome/task/state-action lift", decision["reason"])
+        self.assertIn("no retail-task/reference-path/state-action lift", decision["reason"])
 
     def test_stage_gate_accepts_rl_with_metric_and_error_lift(self) -> None:
         criteria = stage_acceptance.Criteria()

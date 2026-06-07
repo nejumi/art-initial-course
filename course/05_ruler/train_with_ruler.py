@@ -18,7 +18,7 @@ from course.shared.rewards import REWARD_PROFILES
 from course.shared.rl_sampling import reward_signal_metrics, split_reward_signal_groups
 from course.shared.rollout import rollout_retail
 from course.shared.tracing import init_weave
-from course.shared.wandb_artifacts import log_checkpoint_artifact, use_wandb_artifact
+from course.shared.wandb_artifacts import ensure_wandb_run, log_checkpoint_artifact, log_wandb_metrics, use_wandb_artifact
 
 RULER_RUBRIC = """
 Rank the retail support trajectories by: successful task completion, correct tool use,
@@ -43,6 +43,12 @@ async def main_async() -> None:
     parser.add_argument("--judge-effort", default="medium", choices=["low", "medium", "high", "xhigh"])
     parser.add_argument("--ruler-weight", type=float, default=0.3)
     parser.add_argument("--independent-weight", type=float, default=0.7)
+    parser.add_argument(
+        "--shuffle-ruler-trajectories",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Randomize trajectory order before LLM judging to reduce fixed-position bias.",
+    )
     parser.add_argument("--seed", type=int, default=11)
     parser.add_argument("--max-sampling-rounds", type=int, default=4)
     parser.add_argument("--keep-zero-variance-groups", action="store_true")
@@ -62,7 +68,8 @@ async def main_async() -> None:
         os.environ["RETAIL_REWARD_PROFILE"] = args.reward_profile
     cfg = config_from_env()
     if args.weave:
-        init_weave(cfg.project)
+        ensure_wandb_run(cfg, job_type="ruler-grpo")
+        init_weave()
     data_dir = Path(args.data_dir)
     if not (data_dir / f"{args.split}.jsonl").exists():
         write_sample_dataset(data_dir)
@@ -97,6 +104,16 @@ async def main_async() -> None:
     from art.rewards import ruler_score_group
 
     async def score_group(group):
+        if args.shuffle_ruler_trajectories:
+            trajectories = list(group.trajectories)
+            rng.shuffle(trajectories)
+            group = art.TrajectoryGroup(
+                trajectories,
+                exceptions=[],
+                metadata=group.metadata.copy(),
+                metrics=group.metrics.copy(),
+                logs=group.logs.copy(),
+            )
         judged = await ruler_score_group(
             group,
             judge_model=args.judge_model,
@@ -167,6 +184,7 @@ async def main_async() -> None:
         if not groups:
             print("Skipping RULER-GRPO step because no sampled groups had reward variance.", dynamic_filter_metrics)
             await model.log(trajectories=None, metrics=dynamic_filter_metrics, step=last_step, split="train")
+            log_wandb_metrics(cfg, dynamic_filter_metrics, job_type="ruler-grpo", step=last_step)
             append_step_metrics(
                 args.metrics_jsonl,
                 step=last_step,
@@ -183,6 +201,7 @@ async def main_async() -> None:
             **reward_signal_metrics(groups, prefix="data/train"),
         }
         await model.log(groups, metrics=metrics, step=result.step, split="train")
+        log_wandb_metrics(cfg, metrics, job_type="ruler-grpo", step=result.step)
         last_step = result.step
         append_step_metrics(args.metrics_jsonl, step=result.step, algorithm="ruler-grpo", metrics=metrics)
         print("step", result.step, metrics)
@@ -212,6 +231,7 @@ async def main_async() -> None:
                 "max_completion_tokens": args.max_completion_tokens,
                 "scenario_limit": args.limit,
                 "independent_reward_profile": os.getenv("RETAIL_REWARD_PROFILE", "dense"),
+                "shuffle_ruler_trajectories": args.shuffle_ruler_trajectories,
                 "terminate_on_invalid": terminate_on_invalid,
                 "continue_on_invalid": args.continue_on_invalid,
                 "request_logprobs": not args.no_logprobs,

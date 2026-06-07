@@ -28,6 +28,36 @@ def make_local_backend(path: str, gpu_cost_per_hour_usd: float | None = None) ->
     return LocalBackend(**kwargs)
 
 
+def use_active_wandb_run_for_art(model: Any) -> Any:
+    """Prevent ART from creating a separate model-name W&B run.
+
+    ART 0.5.x lazily calls wandb.init(name=model.name, id=model.name) from a
+    private helper. The course uses W&B-generated run IDs and attaches ART
+    metrics/artifacts to the active course run instead.
+    """
+
+    def course_wandb_run() -> Any | None:
+        try:
+            import wandb
+        except ImportError:
+            return None
+        run = getattr(wandb, "run", None)
+        if run is None or getattr(run, "_is_finished", False):
+            return None
+        object.__setattr__(model, "_wandb_run", run)
+        sync_config = getattr(model, "_sync_wandb_config", None)
+        if callable(sync_config):
+            try:
+                sync_config(run)
+            except Exception:
+                pass
+        return run
+
+    object.__setattr__(model, "_get_wandb_run", course_wandb_run)
+    course_wandb_run()
+    return model
+
+
 def openai_server_config(config: RetailCourseConfig) -> dict[str, Any] | None:
     engine_args = vllm_engine_args(config)
     server_args: dict[str, Any] = {}
@@ -81,13 +111,15 @@ def make_trainable_model(config: RetailCourseConfig) -> Any:
         entity=config.entity,
         base_model=config.base_model,
         base_path=config.art_path,
+        report_metrics=[],
         _internal_config=model_internal_config(config),
     )
+    use_active_wandb_run_for_art(model)
     model.update_wandb_config(
         {
             "dataset": config.dataset_id,
             "task": "retail-support-agent",
-            "course": "openpipe-art-wandb-weave",
+            "course": "openpipe-art-retail",
             "model_profile": config.model_profile,
             "base_model": config.base_model,
             "rollout_max_completion_tokens": config.rollout_max_completion_tokens,
@@ -106,7 +138,7 @@ def make_prompted_model(config: RetailCourseConfig, *, name: str | None = None) 
     base_url = config.inference_base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
     inference_name = config.inference_model_name or os.getenv("OPENAI_MODEL") or "gpt-4.1-mini"
     display_name = name or inference_name
-    return art.Model(
+    model = art.Model(
         name=display_name,
         project=config.project,
         entity=config.entity,
@@ -114,4 +146,6 @@ def make_prompted_model(config: RetailCourseConfig, *, name: str | None = None) 
         inference_base_url=base_url,
         inference_model_name=inference_name,
         base_path=config.art_path,
+        report_metrics=[],
     )
+    return use_active_wandb_run_for_art(model)

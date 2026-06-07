@@ -54,7 +54,7 @@ Split and leakage hygiene:
 - Preserve source dataset, source task ID, trace ID, row index, reward, and filter flags in every generated SFT row.
 - Include generated summary JSON files in the W&B data artifact, not just the final mixed JSONL.
 - Audit overlap between mixed SFT source IDs and held-out eval/task IDs before presenting official tau2-style numbers.
-- Treat public teacher/success-trace mixtures as training-proxy material unless the held-out eval tasks are known not to have entered the teacher data.
+- Treat public teacher/success-trace mixtures as training material unless the held-out eval tasks are known not to have entered the teacher data.
 
 Optional RFT bridge:
 
@@ -69,7 +69,7 @@ Because replay data cannot execute arbitrary alternative read-only queries, the 
 - `dense`, `strict_success`, `agentic`: teaching profiles that reward matching the demonstration trace. These are useful for explaining failure modes and tool-call syntax, but they should not be presented as official tau-bench scoring.
 - `tau_sparse`, `tau_irc`: tau-inspired profiles. They focus on state-changing actions and final communication. Read-only mismatches are diagnostics or small penalties, not core reward drivers.
 
-In tau-inspired profiles, the replay environment can accept a single exact reference state-changing action even if the model skipped or reordered preceding read-only lookups. This is controlled by `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS` and defaults to `true` for the course path. Wrong state-changing names or arguments remain invalid and are counted as `bad_state_action`; the option only removes unnecessary read-only replay dependence from a proxy environment that cannot run a full retail database simulator.
+In tau-inspired profiles, the replay environment can accept a single exact reference state-changing action even if the model skipped or reordered preceding read-only lookups. This is controlled by `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS` and defaults to `true` for the course path. Wrong state-changing names or arguments remain invalid and are counted as `bad_state_action`; the option removes unnecessary read-only replay dependence from the lightweight environment.
 
 ## SFT Guidance
 
@@ -163,7 +163,7 @@ Use `--keep-zero-variance-groups` only for debugging ART's raw behavior. For the
 
 For tau-style outcome training, use `--continue-on-invalid` unless the lab is intentionally demonstrating strict replay failure modes. The replay environment cannot execute arbitrary non-reference retail database queries, so strict early termination can collapse exploration before the model reaches the state-changing action and final communication that tau-style scoring actually cares about. With `--continue-on-invalid`, unexpected state-changing actions are still penalized, but read-only deviations are treated as diagnostics or small penalties and the rollout can continue long enough to produce a useful trajectory-level reward.
 
-`--continue-on-invalid` does not make state-changing actions permissive. Unknown tool names are always invalid. For tau-inspired profiles, the replay environment may return a recorded output for a single exact reference state-changing action that appears before its reference read-only path, then advance the replay cursor to the matching state-action turn. This aligns the proxy with tau-style outcome scoring while still rejecting wrong or repeated mutations. Set `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS=false` to restore the stricter replay-order behavior for ablations.
+`--continue-on-invalid` does not make state-changing actions permissive. Unknown tool names are always invalid. For tau-inspired profiles, the replay environment may return a recorded output for a single exact reference state-changing action that appears before its reference read-only path, then advance the replay cursor to the matching state-action turn. This aligns the lightweight replay metric with tau-style outcome scoring while still rejecting wrong or repeated mutations. Set `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS=false` to restore the stricter replay-order behavior for ablations.
 
 Watch `data/step_reward_range_mean`, `data/step_outcome_success_mean`, `data/step_invalid_tool_call_mean`, `data/step_unknown_tool_call_mean`, `data/step_bad_state_action_mean`, `data/step_missing_state_action_mean`, `data/step_truncated_by_max_turn_mean`, and `data/step_num_groups_dropped_no_reward_signal` during RL. If many groups are dropped, the `data/dropped_*_group_rate` metrics show whether they were all-success, all-failure, truncated, invalid-tool, missing-state-action, or never-reached-state-action groups. A good workshop run should show non-zero group reward range and some successful outcomes during sampling before you trust validation improvements.
 
@@ -183,13 +183,13 @@ Reward calibration worksheet:
 
 Long multi-turn retail traces can exceed the local ART packed sequence length. If the trainer warns that it is dropping tokenized trajectories over `packed_sequence_length`, either raise `ART_MAX_SEQ_LENGTH` on H100-class hardware or reduce `ART_ROLLOUT_MAX_COMPLETION_TOKENS` / `max_turns` for constrained GPUs. For final course results, prefer runs where only a small fraction of trajectories are dropped, because dropped trajectories weaken the W&B learning curves and can bias which successes the optimizer sees.
 
-The local `outcome_success` metric is a training proxy. Newer course outputs also log it as `proxy_outcome_success` to make that explicit. For a full benchmark-grade extension, replace `ReplayRetailEnv` with the official tau2 Gym / domain runtime and use DB + COMMUNICATE pass rate as the primary eval metric. Keep reference-action metrics as diagnostics only.
+The local `retail_task_success` metric is the course's main hands-on success metric. For a benchmark-grade extension, serve the trained checkpoint into the official tau2 runtime and report the task's own `reward_basis` components, such as DB, NL assertion, communication, or action checks. Keep reference-action metrics as diagnostics only.
 
-For stochastic evaluation, distinguish workshop proxies from benchmark reporting:
+For stochastic evaluation, distinguish the course evaluation loop from benchmark reporting:
 
 - Deterministic single rollout: fastest instructor check for regressions.
 - `pass@k`: useful diagnostic for whether a checkpoint ever solves a task under sampling.
 - `pass^k`: stricter reliability view for repeated trials; useful before claiming a support agent is dependable.
-- Official tau2 reporting: DB * COMMUNICATE under the official runtime, kept separate from replay-env proxy metrics.
+- Official tau2 reporting: task-specific `reward_basis` under the official runtime, kept separate from the fast course evaluation loop.
 
 The optional bridge in `course/02_weave_evals/official_tau2_eval_bridge.md` keeps this separation clean: ART labs can run in the Python 3.11 training environment, while official tau2 scoring runs in a separate Python 3.12 environment and is imported back into W&B comparison tables with `import_tau2_results.py`.

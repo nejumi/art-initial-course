@@ -23,7 +23,7 @@ from course.shared.art_compat import make_local_backend, make_trainable_model, r
 from course.shared.config import config_from_env
 from course.shared.data import normalize_messages_for_sft as normalize_demo_messages_for_sft
 from course.shared.tracing import init_weave
-from course.shared.wandb_artifacts import log_checkpoint_artifact, sha256_file, use_wandb_artifact
+from course.shared.wandb_artifacts import ensure_wandb_run, log_checkpoint_artifact, sha256_file, use_wandb_artifact
 
 SFT_MASK_MODES = ("all-assistant", "last-assistant")
 
@@ -395,7 +395,8 @@ async def main_async() -> None:
 
     cfg = config_from_env()
     if args.weave:
-        init_weave(cfg.project)
+        ensure_wandb_run(cfg, job_type="sft")
+        init_weave()
     patch_local_sft_masking(args.sft_mask_mode)
     backend = make_local_backend(cfg.art_path, gpu_cost_per_hour_usd=args.gpu_cost_per_hour_usd)
     model = make_trainable_model(cfg)

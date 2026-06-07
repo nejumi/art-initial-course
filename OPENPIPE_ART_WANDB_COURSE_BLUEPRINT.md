@@ -13,7 +13,7 @@
 3. Weaveでrollout、tool call、RULER judge、評価失敗の実例をトレースとして辿れるようにする。
 4. SFTで形式・ツール利用・初期成功率を底上げし、GRPO系RLでタスク性能を改善する。
 5. RULERで報酬設計の初速を上げ、必要に応じて手作り報酬と併用する。
-6. GSPO、`precalculate_logprobs`、KL penalty、importance sampling、checkpoint forking/deletionなどを、単なる引数一覧ではなく「いつ使うか」で理解する。
+6. GSPO、rollout logprobs、KL penalty、importance sampling、checkpoint forking/deletionなどを、単なる引数一覧ではなく「いつ使うか」で理解する。`precalculate_logprobs` はARTバージョンやbackendで利用可否が変わるadvanced topicとして扱う。
 7. Dedicated Cloud / Self-Managed / Customer Managed環境におけるセキュリティ、データ所在、Registry運用、サービスアカウント運用まで含めて設計できる。
 
 短く言うと、受講後の姿は「ARTのサンプルを動かせる人」ではなく、「自社のエージェント学習基盤を設計・デバッグ・説明できる人」。
@@ -65,17 +65,56 @@ APIバージョン互換性:
 
 API互換性チェック:
 
-- 受講者の設定は `.env.example` -> `.env` を基本にし、shell envが `.env` より優先される設計にする。
+- 受講者の設定は `.env.example` -> `.env` と `course/09_runbooks/config.yaml` に分ける。`.env` はW&B/Weave/OpenAIなどの接続情報、`config.yaml` はrun scale、model size、GPU memory presetを扱う。
 - ハンズオンで使う公開API名・引数名は、pinした `openpipe-art` バージョンで `course/00_setup/art_api_smoke.py` のimport/signature smoke testを通してから使う。
 - 特に `backend.train` kwargs、RULER kwargs、SFT helper、checkpoint/state/config系APIはdocsだけでなくsource/installed packageの両方で確認する。
 
 - フルワークショップ + 事前セットアップ + 事後capstone
 - 各章は「座学 -> ハンズオン -> W&B/Weaveで観察 -> 設計判断ディスカッション」の型で進める。
-- 受講者はGPUに応じて2つの演習トラックを選ぶ。
+- 受講者はGPUとネットワーク状況に応じて演習トラックを選ぶ。
 
 ### 3.1 短時間デリバリー版
 
-短時間デリバリーのゴールは、W&B Models / Weave / ARTでagentic SFT/RLをどう設計・観測・検証するかを理解し、短い実行で初期信号を確認し、フル検証済み結果で有効性を確認すること。構成はセッション時間、GPU、事前準備状況に合わせて調整する。
+コースのゴールは、W&B Models / Weave / ARTでagentic SFT/RLをどう設計・観測・検証するかを理解し、短い実行で初期信号を確認し、検証済み結果で有効性を確認すること。構成はセッション時間、GPU、事前準備状況に合わせて調整する。
+
+ワークショップ設定の基本:
+
+受講者が直接編集する設定ファイルは2つに絞る。詳細presetは参照専用として分ける。
+
+| ファイル | 役割 | 触るタイミング |
+| --- | --- | --- |
+| `.env` | W&B / Weave / OpenAI key、W&B project、entity、ART保存先などの環境依存設定 | 受講開始前または最初のsetup |
+| `course/09_runbooks/config.yaml` | run profile、model size、GPU memory preset、必要最小限のoverride | ハンズオン中にGPUや実行時間に合わせて変更 |
+| `course/09_runbooks/base_config.yaml` | SFT/RL/eval/vLLMの詳細preset | 通常は触らない。advanced labで扱う |
+
+受講者が見る `config.yaml` の基本形:
+
+```yaml
+run_profile: workshop_fast_h100
+model_profile: standard
+base_model:
+gpu_memory_preset: standard
+overrides: {}
+```
+
+変更シナリオ:
+
+| やりたいこと | 変更する行 | 意味 |
+| --- | --- | --- |
+| 標準ワークショップを実行 | `run_profile: workshop_fast_h100` | SFT -> GRPOの流れを短めに実行する |
+| 検証済み条件に近いフル実行 | `run_profile: validated_h100` | SFT/RL/evalを増やし、期待結果表に近い検証を行う |
+| 小さいGPUで流れだけ確認 | `model_profile: tiny` | 小型モデルでsetup/SFT/RL smokeを確認する |
+| H100想定の標準モデル | `model_profile: standard` | `LiquidAI/LFM2.5-8B-A1B` を使う |
+| 任意のHF/vLLM互換モデル | `model_profile: custom` と `base_model: ...` | 指定したモデルを直接使う |
+| vLLMのメモリ圧を下げる | `gpu_memory_preset: low` | context長やbatchingを抑え、OOMリスクを下げる |
+| 一時的にRLだけ短くする | `overrides: {rl_steps: 1}` | preset全体は保ちつつ、特定項目だけ上書きする |
+
+設定のメンタルモデル:
+
+- `.env` は「どこにログを送るか、どのkeyを使うか」。
+- `config.yaml` は「何を、どの大きさで、どれくらい学習するか」。
+- `base_config.yaml` は「標準profileの中身」。初回ハンズオンでは開かない。
+- CLI引数は一時的な上書き用。スライドとハンズオンでは `config.yaml` を主導線にする。
 
 推奨セグメント:
 
@@ -83,40 +122,54 @@ API互換性チェック:
 | --- | --- | --- | --- |
 | Opening | W&B Models / Weave復習 | W&B project, Artifact, Weave traceを開く | dataset artifact, SFT checkpoint artifact, trace例 |
 | ART primitives | ART概念マップ | `Scenario -> rollout -> TrajectoryGroup -> train` の最小コード確認 | W&B metricsとWeave traceの対応 |
-| Task and evals | Retail taskと評価指標 | cached eval JSONL / Weave Evaluationを見る | `task_success` と `outcome_success` の違い |
+| Task and evals | Retail taskと評価指標 | cached eval JSONL / Weave Evaluationを見る | Retail Task Successとtrace診断の読み方 |
 | SFT warm start | SFT warm start | 小モデルまたはdry-runでSFT commandを実行 | SFT loss curve、checkpoint artifact lineage |
 | Agentic RL | GRPO/GSPO/RULERの考え方 | 可能なら短いGRPO smoke | group reward range、winner-minus-loser、dropped no-signal groups |
-| Verified results | フル検証済みH100結果 | 事前runのW&B table / Weave tracesを読む | held-out validationでSFT/RLが改善した表 |
+| Verified results | 検証済み結果 | 事前runのW&B table / Weave tracesを読む | Baseline、SFT、RLの横持ち比較表 |
 | Enterprise wrap-up | Enterprise運用設計 | Dedicated Cloud / Self-Managed / LocalBackend比較 | Registry昇格、Artifact lineage、再現性チェックリスト |
 
 実行トラック:
 
 - No GPU / ネットワーク制限あり: `.env`、data artifact、cached eval、Weave trace、runbook dry-runを中心にする。
-- 小さめGPU: `ART_MODEL_PROFILE=tiny` または小型HF互換モデルで、setup、SFT、GRPO smokeの流れを確認する。
-- H100 1枚: `LiquidAI/LFM2.5-8B-A1B` で短いSFTと数stepのGRPOを実行し、初期上昇やreward varianceを観測する。
+- 小さめGPU: `config.yaml` で `model_profile: tiny` にし、setup、SFT、GRPO smokeの流れを確認する。
+- H100 1枚: `config.yaml` で `model_profile: standard`、`run_profile: workshop_fast_h100` または `workshop_standard_h100` を使い、短いSFTと数stepのGRPOを実行する。
 - H100複数枚: SFT parentからGRPO/GSPO/RULERを独立分岐で並列実行し、checkpoint candidate selectionとheld-out evalまで行う。
 
 Key takeaways:
 
 - 短時間runでは、操作手順、W&B/Weave連携、初期学習信号の読み方を体験する。
-- 性能改善は、held-out validation、W&B Artifact lineage、Weave traceが揃ったフル検証結果で確認する。
+- 性能改善は、checkpoint validation、W&B Artifact lineage、Weave traceが揃った検証結果で確認する。
 - 長期RLは単調改善を仮定しない。`select_checkpoint_candidate.py` で中間checkpointを選び、fresh validation evalで採用する。
-- 期待結果表にはtrain rewardのbest rowではなく、held-out evalとacceptance gateを通った結果を載せる。
+- 期待結果表にはtrain rewardのbest rowではなく、checkpoint validationを通った結果を載せる。
+
+検証済み期待結果:
+
+| Stage | `retail_task_success` | `state_action_sequence_match` | `valid_state_action_rate` | `bad_state_action` | `missing_state_action` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 0.160 | 0.160 | 0.160 | 0.480 | 0.840 |
+| SFT anchor | 0.240 | 0.280 | 0.300 | 0.400 | 0.680 |
+| Short GRPO selected checkpoint | 0.280 | 0.360 | 0.360 | 0.160 | 0.640 |
+
+読み方:
+
+- SFTでtool-call形式、状態変更行動、初期成功率を底上げする。
+- 短いGRPOで `bad_state_action` を大きく下げ、`state_action_sequence_match` と `retail_task_success` を改善する。
+- 長いRLは必ずしも単調改善しない。W&Bの学習曲線で候補を選び、held-out validationとWeave traceで採用checkpointを確認する。
 
 トラック:
 
 - Primary: LocalBackend on local GPU / enterprise-managed GPU
 - Enterprise: W&B Dedicated Cloud or Self-Managed with local/customer-managed training
-- Optional: ServerlessBackend on W&B Training, 20-30分の比較デモ
+- Optional: ServerlessBackend on W&B Training, 比較デモ
 
 モデル選択:
 
-- `ART_MODEL_PROFILE=tiny`: `Qwen/Qwen3-0.6B`。小さなGPUやCPU寄り環境でのsetup/SFT/RL smoke test用。性能改善の説得力ではなく、教材の操作手順を低コストに確認するためのプロファイル。
-- `ART_MODEL_PROFILE=standard`: `LiquidAI/LFM2.5-8B-A1B`。H100を想定したメインハンズオンの基準モデル。next-action SFTとtau-style RLを扱う標準プロファイル。
-- `ART_MODEL_PROFILE=openpipe`: `OpenPipe/Qwen3-14B-Instruct`。OpenPipe/Qwen系の互換性比較やmanaged trainingの話題に使う。
-- `ART_MODEL_PROFILE=serverless`: `OpenPipe/Qwen3-14B-Instruct`。W&B Serverless RLの軽い比較デモ用。
-- `ART_MODEL_PROFILE=moe`: `Qwen/Qwen3-30B-A3B-Instruct-2507`。Serverless/Megatron/MoEの発展説明用。
-- `ART_BASE_MODEL` を指定した場合はprofileより優先され、環境に応じて任意のHF/vLLM互換モデルへ差し替えられる。
+- `model_profile: tiny`: `Qwen/Qwen3-0.6B`。小さなGPUやCPU寄り環境でのsetup/SFT/RL smoke test用。性能改善の説得力ではなく、教材の操作手順を低コストに確認するためのプロファイル。
+- `model_profile: standard`: `LiquidAI/LFM2.5-8B-A1B`。H100を想定したメインハンズオンの基準モデル。next-action SFTとtau-style RLを扱う標準プロファイル。
+- `model_profile: openpipe`: `OpenPipe/Qwen3-14B-Instruct`。OpenPipe/Qwen系の互換性比較やmanaged trainingの話題に使う。
+- `model_profile: serverless`: `OpenPipe/Qwen3-14B-Instruct`。W&B Serverless RLの軽い比較デモ用。
+- `model_profile: moe`: `Qwen/Qwen3-30B-A3B-Instruct-2507`。Serverless/Megatron/MoEの発展説明用。
+- `model_profile: custom` と `base_model: ...` を指定すると、環境に応じて任意のHF/vLLM互換モデルへ差し替えられる。
 
 SFT/RL設計の実務的学び:
 
@@ -126,9 +179,78 @@ SFT/RL設計の実務的学び:
 - SFTはagentic RLの代替ではなく、tool-call dialect、policy adherence、初期成功率、rolloutの安定性を整えるwarm startとして位置づける。
 - RLの報酬設計は、final successだけの疎な報酬では信号が弱く、dense rewardを足しすぎると本来の成功方向とずれることがある。verifiable outcome、state-changing action correctness、communication quality、安全ペナルティを分けて設計する。
 - 報酬設計は一度で決めない。既存研究のレシピを初期仮説にし、reward profile、penalty weight、learning rate、checkpoint selection metricを複数水準で比較する。
+
+Agentic RLの報酬設計を分解して考える:
+
+| 観点 | 目的 | W&B / Weaveで確認するもの |
+| --- | --- | --- |
+| Verifier reward | DB state、tool action、task completionなど、厳密に検証できる正しさを守る | `retail_task_success`, `state_action_sequence_match`, reward component table |
+| Shaping reward | sparse successだけでは弱いので、途中行動にも学習信号を与える | group内reward variance、winner-minus-loser差分、state-action reached/attempted rate |
+| Penalty design | 不正tool、余計なmutation、missing action、truncationを抑える | `bad_state_action`, `missing_state_action`, invalid tool trace, truncated rollout |
+| RULER | 会話品質、説明の自然さ、policy alignmentなど厳密検証しにくい品質を見る | RULER judge trace、hybrid reward比率別のheld-out eval |
+| Checkpoint metric | train reward最大ではなく、held-outで伸びる候補を選ぶ | checkpoint comparison table、model artifact lineage、acceptance gate |
+| Weave trace | なぜ成功/失敗したかをtrajectory単位で説明可能にする | rollout trace、tool call trace、reward function trace、failure examples |
+
+報酬設計の従来知見との接続:
+
+| 教材で扱う観点 | 関連する既存知見 |
+| --- | --- |
+| SFT -> RLの段階設計 | InstructGPT/RLHFはdemonstration SFT、preference/reward model、RLという段階設計を採用する。Agentic RLでもSFTをwarm startとして使い、RLで実際のrolloutから改善する構図は近い。 |
+| Verifiable reward | DeepSeekMath/DeepSeek-R1系のGRPO/RLVRでは、正誤判定やformat rewardなど検証可能な報酬が中核になる。tool-using agentではDB state、tool action、policy complianceがこれに相当する。 |
+| Process / shaping reward | reward shapingは古典的RLから知られる設計課題で、途中状態への報酬は学習を助ける一方、最適化対象をずらす危険がある。process supervisionは最終結果だけでなく中間ステップを評価する流れと対応する。 |
+| Reward hackingへの警戒 | 報酬を増やしても本来の目的を満たさないspecification gamingは、RL安全性の古典的問題。agentでは「もっともらしい応答」「余計なtool call」「状態を壊す近道」を検出する必要がある。 |
+| LLM-as-judge / RLAIF | Constitutional AI/RLAIFやRULERは、厳密検証しにくい品質をAI judgeで評価する系譜にある。教材ではverifiable rewardを主軸にし、RULERは会話品質やpolicy説明の補助として使う。 |
+| Trace-driven eval | tau-bench/tau2-benchやinteractive tool-agent研究では、最終応答だけでなくmulti-turn trajectory、tool use、state transition、policy adherenceを評価する。W&B/Weaveはこの評価を実験管理と失敗分析に接続する。 |
+
+RLVRの位置づけ:
+
+- Verifiable Rewardの発想自体は新しくない。数学の正答照合、コードのunit test、ゲームスコア、定理証明器、tool実行結果など、機械的に検証できる報酬は従来からRLの強い設定だった。
+- DeepSeekMathはGRPOとrule-based rewardを組み合わせ、LLM reasoning post-trainingでVerifiable Rewardが大きく効くことを示した代表例になった。
+- DeepSeek-R1以降、RLVRは「人間の好みを毎回ラベルする代わりに、検証可能なタスクで大規模にrolloutし、正解・形式・制約で報酬を返す」post-training recipeとして広く注目されている。
+- Agentic workflowでは、検証対象がfinal answerだけでなく、tool call、DB state、policy compliance、user communication、turn-level processに広がる。
+
+RLVRのpitfall:
+
+| Pitfall | 何が起きるか | 教材での対策 |
+| --- | --- | --- |
+| 代理指標の限界 | verifierが測れるものだけを最適化し、本来の顧客価値とずれる | outcome、state action、communication、policyを分解して見る |
+| Sparse reward | 最後の成功/失敗だけでは、どの行動が良かったか学習信号が弱い | state-changing action correctnessやprocess metricsを入れる |
+| Reward hacking | verifierの穴、format、固定task分布、unit testの癖に過適合する | held-out eval、negative examples、trace inspectionで確認する |
+| Process blind spot | 最終状態は正しいが、途中で余計なtool callや危険なmutationをする | bad/missing state action、invalid mutation、truncationをpenalty化する |
+| Quality blind spot | DB stateは合っているが、顧客対応として不親切、説明不足、brand tone不一致になる | RULERやWeave traceで会話品質を補助評価する |
+| Simulator noise | multi-turn agentではユーザー役や環境のノイズが報酬を歪める | deterministic env、seed固定、rollout trace、複数rollout evalで分離する |
+| Distribution shift | train verifierでは勝つが、新しい言い回し・長い会話・異なるpolicyで崩れる | train/holdout分割、stochastic eval、scenario-level failure analysisを行う |
+
+RULER / LLM-as-judgeの使いどころ:
+
+| 注意点 | 何が起きるか | 教材での扱い |
+| --- | --- | --- |
+| Relative judgeでありverifierではない | もっともらしい会話を高く評価し、DB stateやtool correctnessを取り違えることがある | strict verifierを主軸にし、RULERは低めの重みで補助する |
+| Position bias | trajectoryの提示順によってscoreが揺れることがある | trajectory順序をshuffleし、必要なら複数judge passを比較する |
+| Long-context confusion | trajectoryが長いと、trajectory IDと内容の対応や失敗箇所の記憶が混ざる | 短いcurriculum、要約、failure trace確認、max turns管理を使う |
+| Rubric sensitivity | rubricの曖昧さで、何を良いtrajectoryとみなすかが変わる | rubricをtask success、tool use、policy、communicationに分解する |
+| Score calibration | 0-1 scoreの絶対値はjudgeやpromptに依存する | GRPOのgroup-relative signalとして使い、held-out evalで採用判断する |
+
+Key message:
+
+> Verifiable Reward is necessary, but not sufficient. In agentic workflows, the trajectory itself is part of the product.
+
+Reference anchors:
+
+- Ouyang et al., "Training language models to follow instructions with human feedback", 2022: https://arxiv.org/abs/2203.02155
+- Ng, Harada, Russell, "Policy invariance under reward transformations: Theory and application to reward shaping", 1999: https://ai.stanford.edu/~ang/papers/shaping-icml99.pdf
+- Lightman et al., "Let's Verify Step by Step", 2023: https://arxiv.org/abs/2305.20050
+- Amodei et al., "Concrete Problems in AI Safety", 2016: https://arxiv.org/abs/1606.06565
+- Shao et al., "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models", 2024: https://arxiv.org/abs/2402.03300
+- Guo et al., "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning", 2025: https://arxiv.org/abs/2501.12948
+- Bai et al., "Constitutional AI: Harmlessness from AI Feedback", 2022: https://arxiv.org/abs/2212.08073
+- AReaL/SEA, "From Self-Evolving Synthetic Data to Verifiable-Reward RL: Post-Training Multi-turn Interactive Tool-Using Agents", 2026: https://arxiv.org/abs/2601.22607
+- tau2-bench repository: https://github.com/sierra-research/tau2-bench
+- ART RULER documentation: https://art.openpipe.ai/fundamentals/ruler
+
 - RULERは、正解DB stateのような厳密検証を置き換えるものではなく、会話品質、ポリシー説明、簡潔さ、安全な顧客対応など、verifierだけでは表現しにくい軸を補助するために使う。
 - Retail taskでは、`verifier reward` を主軸にし、RULERを低めの重みでhybrid rewardに混ぜる水準と、RULERを強める水準を比較する。
-- 短いbridge curriculumで `next-action SFT -> GRPO branch / GSPO branch` を独立比較し、`tau_irc` 系報酬、state-changing action correctness、communication success、proxy outcome success、official tau2 importを横持ち表で検証する。
+- 短いbridge curriculumで `next-action SFT -> GRPO branch / GSPO branch` を独立比較し、`tau_irc` 系報酬、state-changing action correctness、communication success、Retail Task Successを横持ち表で検証する。
 - SFT checkpointはlossだけでは採用しない。baseline/SFT/RLを同じholdoutでWeave evalし、SFTが少なくともtool-call形式とstate-changing action指標を改善していることを確認してからRL parentにする。
 - RLは「エラーなく回る」では合格にしない。group内reward variance、winner-minus-loser差分、zero-variance group filter、state-action attempt/reached rate、bad/missing state-action rateをW&Bに出し、GRPO/GSPOが実際に学習信号を受けていることを確認する。
 - 長いRL runは単調改善を仮定しない。`train_metrics_<algo>_<suffix>.jsonl` と `select_checkpoint_candidate.py` で候補stepを選び、中間checkpointをheld-out eval、W&B Artifact lineage、Weave traceで確認してから採用する。
@@ -140,7 +262,7 @@ SFT設計で巨人の肩に乗るポイント:
 - CoVeの考え方に合わせ、ただの成功ログではなく、制約・検証器・canonical reward・judge qualityでcleanに確認できる軌跡を優先する。教材では `KermitCO/...retail-traces` の reward-1 / non-memory / blind-strict filter と、unknown tool除去がこの役割を担う。
 - TopoCurateの考え方に合わせ、SFTは「成功しているが多様で、必要なら回復行動も含む」軌跡を使い、RLは「まだ失敗分岐が残り、group-relative advantageが立つ」タスク集合を選ぶ。bridge curriculumは簡単にしすぎず、no-signal group diagnosticsで難易度を監視する。
 - 次アクションSFTを主軸にし、full-dialog SFTは教育用baselineに留める。長いfull-dialogをそのまま全assistant turnでmaskすると、前のassistant行動まで重複監督して、W&B上のloss改善と実際のagentic改善がズレやすい。
-- SFT採用条件はlossではなく、Weave eval上の `outcome_success`, `task_success`, `state_action_sequence_match`, `bad_state_action`, `missing_state_action`, tool-call F1/argument matchで判断する。
+- SFT採用条件はlossではなく、Weave eval上の `retail_task_success`, `state_action_sequence_match`, `bad_state_action`, `missing_state_action`, `reference_tool_sequence_exact_match`, tool-call F1/argument matchで判断する。
 
 学習題材:
 
@@ -149,14 +271,54 @@ SFT設計で巨人の肩に乗るポイント:
 - 入力: 顧客からの注文キャンセル、返品、交換、住所変更、注文状況確認、商品情報確認などの問い合わせ。
 - 出力: 顧客への自然文応答と、必要なOpenAI tool-calling形式の関数呼び出し。
 - ツール例: `get_user_details`, `get_order_details`, `modify_pending_order_address`, `cancel_pending_order`, `return_delivered_order`, `exchange_delivered_order`, `calculate`。
-- 報酬:
-  - tau-style proxy outcome success
-  - state-changing action correctness and argument correctness
-  - communication success
-  - invalid/unknown tool call penalty
-  - bad or missing state-changing action penalty
-  - excessive turn / truncation penalty
-  - RULERによる「顧客対応の自然さ」「ポリシー説明のよさ」「簡潔さ」
+
+受講者向け導入スライド: 今回解くタスク
+
+このハンズオンでは、オンライン小売店のカスタマーサポートAgentを作る。ユーザーは注文キャンセル、返品、交換、住所変更、注文状況確認などを依頼する。Agentは会話だけで答えるのではなく、必要に応じてtoolを呼び、架空の小売DBの状態を正しく更新する。
+
+Agentが行うこと:
+
+| Step | Agentの仕事 | 例 |
+| --- | --- | --- |
+| 1. 依頼を理解する | ユーザーが何をしたいかを読む | 「注文をキャンセルしたい」「配送先を変更したい」 |
+| 2. 状態を確認する | 顧客、注文、商品、ポリシーをread-only toolで確認する | `get_user_details`, `get_order_details` |
+| 3. 判断する | その依頼を実行してよいかをpolicyと状態から判断する | 出荷前ならキャンセル可、出荷後なら返品案内 |
+| 4. 状態を変える | 必要な場合だけstate-changing toolを呼ぶ | `cancel_pending_order`, `modify_pending_order_address` |
+| 5. 結果を伝える | 実行結果、できない理由、次に必要な情報をユーザーに伝える | 「注文をキャンセルしました」「この注文は既に発送済みです」 |
+
+具体例:
+
+| ユーザー依頼 | Agentが確認すること | 正しいtool action | 正しい最終応答 |
+| --- | --- | --- | --- |
+| 「注文Aをキャンセルしたい」 | 注文Aが本人の注文か、まだキャンセル可能か | キャンセル可能なら `cancel_pending_order` | キャンセル完了、またはキャンセル不可の理由を伝える |
+| 「配送先住所を変えたい」 | 注文がまだ発送前か、新住所が指定されているか | 変更可能なら `modify_pending_order_address` | 変更完了、または変更不可の理由を伝える |
+| 「届いた商品を返品したい」 | 配送済みか、返品期間内か、商品が返品対象か | 条件を満たせば `return_delivered_order` | 返品受付、返金や返送に必要な情報を伝える |
+
+何を成功とみなすか:
+
+| 評価軸 | 意味 | 成功例 | 失敗例 |
+| --- | --- | --- | --- |
+| Retail Task Success | 必要な状態変更を正しく行い、結果をユーザーに伝え、危険なtool actionや途中打ち切りがない | 正しい注文だけをキャンセルし、完了と返金見込みを伝える | 別注文を変更した、必要な状態変更をしない、結果を伝えない |
+| State Action Match | 結果に効くstate-changing toolを正しい引数で呼べたか | `cancel_pending_order` を正しいorder_idとreasonで呼ぶ | `return_delivered_order` を誤って呼ぶ、order_idを間違える |
+| Communication Success | 最終応答でユーザーが必要とする結果を伝えたか | 完了、不可理由、次の手順を簡潔に伝える | DBは更新したが、ユーザーに結果を伝えない |
+| Reference Tool Sequence Exact Match | 参照解法と同じtool pathを辿ったか | 模範解答と同じ順番でtoolを呼んだ | 違う順番だが正しく解けた場合も0になりうる |
+
+重要な区別:
+
+- 講座の主指標は `retail_task_success`。これはARTのrollout内で使える軽量な成功判定。
+- 参照解法と同じread-only tool順序を辿ること自体は主成功条件ではない。
+- 結果に効くstate-changing action、final response、invalid action、truncationを分けて見る。
+- official tau2 runtimeでの最終確認は拡張扱い。必要な場合にだけ、別環境で同じcheckpointを評価する。
+
+学習中に使う報酬:
+
+- Retail Task Success
+- state-changing action correctness and argument correctness
+- communication success
+- invalid/unknown tool call penalty
+- bad or missing state-changing action penalty
+- excessive turn / truncation penalty
+- RULERによる「顧客対応の自然さ」「ポリシー説明のよさ」「簡潔さ」
 
 この題材がよい理由:
 
@@ -429,13 +591,13 @@ groups = await art.gather_trajectory_groups(
 | reward scaling | `scale_rewards=True` | `advantage_balance` |
 | clipping/IS | default | `epsilon`, `epsilon_high`, `truncated_importance_sampling` |
 | GSPO | 比較実験のみ | MoE/long trajectoryでの検証 |
-| logprobs | rolloutで取得 | `precalculate_logprobs`, `allow_training_without_logprobs` |
+| logprobs | rolloutで取得 | backend対応時の `precalculate_logprobs`, `allow_training_without_logprobs` |
 | memory | default | `packed_sequence_length`, `logprob_calculation_chunk_size` |
 | stability | reward/learning rate | `kl_penalty_coef`, KL reference |
 
 落とし穴:
 
-- `precalculate_logprobs=True` は初回ハンズオンの逃げ道にしない。追加forward passの意味を説明してから扱う。
+- `precalculate_logprobs` は、追加forward pass、stale logprobs、ART/backendの対応状況を理解してから使うadvanced設定として扱う。
 - `allow_training_without_logprobs=True` は便利だが、importance samplingの理解を曖昧にするのでadvanced扱い。
 - `backend.train` 直後に `result.step`, `result.metrics`, `checkpoint_path` または `artifact_name` を観察する。
 
@@ -471,11 +633,32 @@ await train_sft_from_file(
 
 - `model.log` はART観測性の境界。`history.jsonl`, trajectory parquet, W&B run metricsがここで揃う。
 - W&Bは時系列とlineage、Weaveは各rollout/reward/evalの実行木を見る。
-- Weave traceとART trajectoryは同じものではない。trace idやartifact uriをmetadataで結ぶ。
+- Weave traceとART trajectoryは同じものではない。W&B Run ID、trace id、artifact uriをmetadataで結ぶ。
+- W&B RunとWeave Traceは同じprojectに保存するだけではなく、同じrun contextに関連付ける。これにより、W&B Workspace上で学習曲線、checkpoint、rollout trace、cached Evaluationを同じ実験単位で読める。
+- W&B Run IDはRunの識別子。実験条件のラベル付けには `tags`、`notes`、`config` を使う。
 
 重要API:
 
 ```python
+import wandb
+import weave
+
+run = wandb.init(
+    entity=ENTITY,
+    project=PROJECT,
+    job_type="grpo",
+    tags=["stage:grpo-train", "kind:training", "algo:grpo", "profile:validated_h100"],
+    notes="SFT checkpointからGRPOを実行し、rollout trace、checkpoint lineage、held-out evalを確認するrun。",
+    config={
+        "base_model": BASE_MODEL,
+        "art_model_name": ART_MODEL_NAME,
+        "dataset": DATASET_ID,
+        "reward_profile": REWARD_PROFILE,
+    },
+)
+weave_client = weave.init(f"{ENTITY}/{PROJECT}")
+weave_client.set_wandb_run_context(run_id=run.id)
+
 result = await backend.train(model, groups, learning_rate=5e-6)
 await model.log(groups, metrics=result.metrics, step=result.step, split="train")
 
@@ -489,6 +672,7 @@ async def score_reward(scenario_id: str, trajectory_summary: dict) -> dict:
 - `model.log` を忘れると、訓練は進んでもW&B/ローカル履歴に証跡が残らない。
 - `model._get_wandb_run()` は内部API。教材の一般コードでは直接依存しない。
 - Weaveにlogprobsをそのまま出すと重いので `strip_logprobs` を使う。
+- Weave TraceがW&B Runに見えないときは、project一致だけでなく、Weave clientにactive W&B Run IDが渡っているかを確認する。Run IDはW&Bが生成した `run.id` を使い、条件名やモデル名をIDとして渡さない。
 
 #### J. Checkpoints, state, and registry
 
@@ -780,12 +964,12 @@ result = await backend.train(
 )
 ```
 
-Slide 30: `precalculate_logprobs`
+Slide 30: rollout logprobs and stale-policy diagnostics
 
-- recomputes current-policy logprobs before training
-- stores original logprobs for some IS/truncation flows
+- rollout-time logprobs are requested with `logprobs=True, top_logprobs=0`
+- current-policy logprob recomputation is backend/version dependent
 - extra forward-pass cost
-- useful for stale/off-policy logprobs experiments
+- useful for stale/off-policy diagnostics when the installed ART path exposes it
 
 ### Chapter 10 - Checkpoints, Registry, and Deployment
 
@@ -885,15 +1069,17 @@ course/
 
 - `python -m pip install "openpipe-art[backend]" weave wandb python-dotenv`
 - `wandb login`
-- `weave.init("<entity>/<project>")`
-- `@weave.op` で1つ関数をtrace
-- `wandb.init` 内で呼び出し、runとtraceがリンクすることを確認
+- `.env` の `WANDB_ENTITY`, `WANDB_PROJECT`, `WEAVE_PROJECT` を確認
+- `course/00_setup/env_check.py` で環境変数と認証状態を確認
+- `course/00_setup/wandb_weave_smoke.py` でW&B RunとWeave Traceの連携を確認
+- `course/00_setup/art_api_smoke.py` でART API互換性を確認
 
 期待成果:
 
-- W&B runが1つ作られる
-- Weave traceが1つ作られる
-- trace tableにrun linkが出る
+- W&B Runが1つ作られる
+- Weave Traceが1つ作られる
+- Weave callの `wb_run_id` がW&B Runを指し、Run画面からtraceへ移動できる
+- W&B Project内で、Run、Artifact、Traceを同じ実験単位として読める
 
 ### Lab 01 - ART Primitives Without Training
 
@@ -907,12 +1093,12 @@ course/
 - `RetailScenario`, `RetailEnv`, `Trajectory`, `TrajectoryGroup` を作る
 - prompted baseline modelでdry-run rollout
 - `logprobs=True, top_logprobs=0` を要求
-- `dense`, `tau_sparse`, `tau_irc` のreward profileを切り替えて、replay rewardとtau-style outcome proxyの違いを見る
+- `dense`, `tau_sparse`, `tau_irc` のreward profileを切り替えて、reference-path rewardとRetail Task Successの違いを見る
 - `await model.log(groups, split="val")`
 
 期待成果:
 
-- W&Bに `val/reward`, `val/task_success`, `val/policy_violation`, `val/invalid_tool_call` が出る
+- W&Bに `val/reward`, `val/retail_task_success`, `val/policy_violation`, `val/invalid_tool_call` が出る
 - Weaveにrollout/tool/reward traceが出る
 - parquet trajectoryが `.art/.../trajectories/val/0000.parquet` に保存される
 
@@ -926,14 +1112,14 @@ course/
 
 - retail holdout taskを `weave.Dataset(name="tau-retail-holdout", rows=...)` としてpublish
 - `weave.Model` または `@weave.op` wrapperでprompted baselineを評価
-- scorerを実装: `task_success`, `policy_violation`, `correct_tool_name`, `correct_tool_args`, `turn_count`, `unsafe_mutation`
+- scorerを実装: `retail_task_success`, `reference_tool_sequence_exact_match`, `policy_violation`, `correct_tool_name`, `correct_tool_args`, `turn_count`, `unsafe_mutation`
 - `weave.Evaluation(dataset=dataset, scorers=[...])` を実行
 - aggregate結果をW&B run summary/tableにも戻す
 
 期待成果:
 
 - Weave Evaluation UIでbaselineの失敗例を開ける
-- W&B runに `eval/task_success`, `eval/policy_violation`, `eval/avg_turns` が出る
+- W&B runに `eval/retail_task_success`, `eval/policy_violation`, `eval/avg_turns` が出る
 - 以後のSFT/RL checkpointを同じdataset/scorersで比較できる
 
 ### Lab 03 - SFT Warmup
@@ -996,12 +1182,12 @@ Reward profile matrix:
 
 | Profile | Primary use | What it teaches | Caveat |
 | --- | --- | --- | --- |
-| `dense` | early mechanics | reference tool names, arguments, final text similarity | replay-style reward; do not present as tau2 score |
+| `dense` | early mechanics | reference tool names, arguments, final text similarity | replay-style reward for learning mechanics |
 | `strict_success` | failure demo | exact reference trajectory success/failure | too brittle for agentic RL |
 | `agentic` | transition profile | state-changing action and final communication diagnostics | still tied to replay data |
 | `tau_sparse` | tau-style baseline | sparse outcome / communication anchor | lower reward density |
 | `tau_irc` | main RL lab | calibrated outcome + state-action shaping | must be validated against held-out eval |
-| official tau2 `DB * COMMUNICATE` | benchmark-grade reporting | final DB hash and required communication | requires separate tau2 runtime |
+| optional official tau2 runtime | benchmark-grade extension | final database state and task-specific assertions pass in the official simulator | requires separate tau2 runtime |
 
 ### Lab 05 - RULER Hybrid Reward
 
@@ -1027,7 +1213,7 @@ Weave:
 
 - RULERは現時点で `additional_histories` を含むtrajectoryをサポートしない。
 - 開発初期は `debug=True` でjudge reasoningを確認する。
-- tau-style trainingではverifiable outcome/state-changing-action rewardをanchorにする。judge rewardでDB/COMMUNICATE相当の検証可能信号を置き換えない。
+- tau-style trainingではverifiable outcome/state-changing-action rewardをanchorにする。judge rewardでDB、NL assertion、communicationなどの検証可能信号を置き換えない。
 
 ### Lab 06 - GSPO and Config Matrix
 
@@ -1041,7 +1227,7 @@ Weave:
 - B: `importance_sampling_level="sequence"` (GSPO)
 - C: `importance_sampling_level="geometric_average"`
 - D: `kl_penalty_coef=0.01`
-- E: `precalculate_logprobs=True`
+- E: rollout logprob / stale-policy diagnostic, with `precalculate_logprobs` only when supported by the installed ART/backend path
 
 比較:
 
@@ -1114,20 +1300,20 @@ Serverless補足:
 | `importance_sampling_level` | token/sequence単位のIS | GSPO章で扱う |
 | `epsilon`, `epsilon_high` | clipping範囲 | PPO/IS章で扱う |
 | `kl_penalty_coef` | referenceから逸脱しすぎるtokenのadvantage補正 | 安定化章 |
-| `precalculate_logprobs` | 学習直前にcurrent policy logprobsを再計算 | off-policy/stale logprobs章 |
+| rollout logprobs / `precalculate_logprobs` | rollout時logprobsの取得と、対応backendでのcurrent policy logprobs再計算 | off-policy/stale logprobs章 |
 | `allow_training_without_logprobs` | logprobsなしassistant dictも訓練対象にする | 注意付きadvanced |
 | `packed_sequence_length` | packing後のsequence長 | VRAM/long context章 |
 | `logprob_calculation_chunk_size` | logprob計算chunk | memory tuning章 |
 | `save_checkpoint` | LocalBackend checkpoint保存 | ops章 |
 
-### `precalculate_logprobs` の説明
+### rollout logprobs / `precalculate_logprobs` の説明
 
 教材での言い方:
 
 - ARTのRLでは、assistant出力のtoken logprobsが重要。
 - `Choice` にlogprobsがある場合、tokenizerがそれをold policy logprobsとして使う。
-- LocalBackendでは、logprobsが全く無く、`allow_training_without_logprobs=False` の場合、学習対象データなしとしてskipされる。
-- `precalculate_logprobs=True` は、Unsloth local pathで学習直前に現在のpolicyでnew logprobsを計算し直し、元のlogprobsを `original_logprobs` に保持する。
+- LocalBackendでは、logprobsが全く無く、`allow_training_without_logprobs=False` の場合、学習対象データなしとしてskipされることがある。
+- `precalculate_logprobs` は、対応しているART/backend pathで学習直前に現在のpolicy logprobsを再計算するadvanced設定として扱う。利用前にpinしたARTバージョンのdocs/source/smoke testで確認する。
 - 追加forward passが必要なので、最初のlabでは使わない。
 - off-policy data、stale logprobs、truncated importance samplingの実験、特定のstability issueの調査で扱う。
 
@@ -1135,7 +1321,7 @@ Serverless補足:
 
 - live rolloutでは、可能なら `logprobs=True, top_logprobs=0` を要求する。
 - Weaveに巨大なlogprobsを載せすぎないため、公式例のように `strip_logprobs` をglobal postprocessに入れる。
-- `allow_training_without_logprobs=True` は便利だが、importance samplingの意味が弱くなるので初学者の逃げ道にしない。
+- `allow_training_without_logprobs=True` は、importance samplingを使わない簡易設定としてadvancedで扱う。
 
 ### GRPO/GSPO/PPO/CISPOの表現
 
@@ -1197,9 +1383,11 @@ async def rollout(model_name: str, scenario_id: str) -> dict:
 
 W&B runとの関連付け:
 
-- `wandb.init()` context内で `@weave.op()` を呼ぶと自動でrunに関連付く。
+- `wandb.init()` context内で `@weave.op()` を呼ぶと、Weaveはactive runを検出できる。
+- 学習runや評価runでは `set_wandb_run_context(run_id=run.id)` を明示し、traceを特定のW&B Runに関連付ける。
+- Run名とRun IDはW&Bに生成させる。検索・比較・再現に必要な情報は `tags`、`notes`、`config`、Artifact lineageに入れる。
 - ARTの `model._get_wandb_run()` は内部APIなので教材の一般コードでは直接依存しない。
-- 必要ならWeave clientの `set_wandb_run_context(run_id=..., step=...)` を使う章をadvancedに置く。
+- `step` を渡すと特定stepのtraceとして見られる。step未指定でもRun単位の関連付けは残る。
 
 ## 11. Enterprise deployment guidance
 
@@ -1348,7 +1536,7 @@ W&B runとの関連付け:
 - Weave traceがrunに紐づかない
   - `weave.init` projectとW&B projectの一致
   - `wandb.init` context内でopを呼んだか
-  - `set_wandb_run_context`
+  - `set_wandb_run_context(run_id=wandb.run.id)` が呼ばれているか
 - checkpointが増えすぎる
   - `delete_checkpoints`
   - best metricがhistoryに存在するか

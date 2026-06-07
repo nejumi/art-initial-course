@@ -39,6 +39,16 @@ def reward_breakdown_value(reward_info: dict[str, Any], *names: str) -> float | 
     return None
 
 
+def checks_success(reward_info: dict[str, Any], *names: str, default: float = 1.0) -> float:
+    for name in names:
+        checks = reward_info.get(name)
+        if isinstance(checks, list):
+            if not checks:
+                return default
+            return bool_metric(all((check or {}).get("met") for check in checks if isinstance(check, dict)))
+    return default
+
+
 def partial_action_metrics(reward_info: dict[str, Any]) -> dict[str, float]:
     checks = reward_info.get("action_checks") or []
     if not isinstance(checks, list) or not checks:
@@ -75,14 +85,17 @@ def row_from_simulation(simulation: dict[str, Any], *, source_path: Path) -> dic
     reward = float(reward_info.get("reward") or 0.0)
     db_reward = reward_breakdown_value(reward_info, "DB", "db")
     communicate_reward = reward_breakdown_value(reward_info, "COMMUNICATE", "communicate")
+    nl_assertion_reward = reward_breakdown_value(reward_info, "NL_ASSERTION", "nl_assertion", "NL_ASSERTIONS", "nl_assertions")
     metrics: dict[str, float] = {
+        "tau2_official_success": reward,
         "tau2_official_reward": reward,
         "tau2_db_success": db_reward if db_reward is not None else bool_metric(nested(reward_info, "db_check", "db_match")),
         "tau2_communicate_success": communicate_reward
         if communicate_reward is not None
-        else 1.0
-        if not reward_info.get("communicate_checks")
-        else bool_metric(all((check or {}).get("met") for check in reward_info.get("communicate_checks") or [])),
+        else checks_success(reward_info, "communicate_checks", "communication_checks"),
+        "tau2_nl_assertion_success": nl_assertion_reward
+        if nl_assertion_reward is not None
+        else checks_success(reward_info, "nl_assertion_checks", "nl_assertions", default=1.0),
         "tau2_terminated_cleanly": 1.0
         if simulation.get("termination_reason") in {"agent_stop", "user_stop", "AGENT_STOP", "USER_STOP"}
         else 0.0,

@@ -11,7 +11,12 @@ CONFIGS = [
     {"name": "gspo-sequence", "importance_sampling_level": "sequence", "learning_rate": 5e-6},
     {"name": "geometric-average", "importance_sampling_level": "geometric_average", "learning_rate": 5e-6},
     {"name": "with-kl", "importance_sampling_level": "token", "learning_rate": 5e-6, "kl_penalty_coef": 0.01},
-    {"name": "precalculate-logprobs", "importance_sampling_level": "token", "learning_rate": 5e-6, "precalculate_logprobs": True},
+    {
+        "name": "rollout-logprob-diagnostic",
+        "importance_sampling_level": "token",
+        "learning_rate": 5e-6,
+        "notes": "Enable precalculate_logprobs only after confirming backend support in the pinned ART version.",
+    },
 ]
 
 

@@ -19,8 +19,8 @@ summarize = compare_checkpoints.summarize
 
 PRIMARY_KEYS = [
     "reward",
-    "outcome_success",
-    "task_success",
+    "retail_task_success",
+    "reference_tool_sequence_exact_match",
     "state_action_sequence_match",
     "bad_state_action",
     "missing_state_action",
@@ -31,6 +31,12 @@ TRAIN_SIGNAL_KEYS = [
     "data/train_agentic_signal_group_rate",
     "data/train_reward_only_signal_group_rate",
     "data/step_trainable_group_fraction",
+    "data/train_retail_task_success_mixed_group_rate",
+    "data/train_proxy_tau2_success_mixed_group_rate",
+    "data/train_reference_tool_sequence_mixed_group_rate",
+    "data/train_winner_minus_loser_retail_task_success",
+    "data/train_winner_minus_loser_proxy_tau2_success",
+    "data/train_winner_minus_loser_reference_tool_sequence_exact_match",
     "data/train_outcome_success_mixed_group_rate",
     "data/train_task_success_mixed_group_rate",
     "data/train_winner_minus_loser_outcome_success",
@@ -45,8 +51,8 @@ TRAIN_SIGNAL_KEYS = [
 
 @dataclass(frozen=True)
 class Criteria:
-    sft_max_outcome_regression: float = 0.0
-    sft_max_task_regression: float = 0.0
+    sft_max_proxy_success_regression: float = 0.0
+    sft_max_reference_path_regression: float = 0.0
     rl_min_reward_delta: float = 0.05
     rl_min_outcome_delta: float = 0.05
     rl_min_task_delta: float = 0.05
@@ -60,6 +66,12 @@ class Criteria:
 
 def numeric(summary: dict[str, Any], key: str) -> float | None:
     value = summary.get(key)
+    if value is None and key == "retail_task_success":
+        value = summary.get("proxy_tau2_success", summary.get("outcome_success"))
+    if value is None and key == "proxy_tau2_success":
+        value = summary.get("retail_task_success", summary.get("outcome_success"))
+    if value is None and key == "reference_tool_sequence_exact_match":
+        value = summary.get("task_success")
     if isinstance(value, (int, float)):
         return float(value)
     return None
@@ -154,6 +166,9 @@ def train_signal_quality(train_summary: dict[str, Any] | None, criteria: Criteri
     reward_only_group_rate = numeric(train_summary, "data/train_reward_only_signal_group_rate")
     trainable_fraction = numeric(train_summary, "data/step_trainable_group_fraction")
     positive_agentic = [
+        numeric(train_summary, "data/train_winner_minus_loser_retail_task_success"),
+        numeric(train_summary, "data/train_winner_minus_loser_proxy_tau2_success"),
+        numeric(train_summary, "data/train_winner_minus_loser_reference_tool_sequence_exact_match"),
         numeric(train_summary, "data/train_winner_minus_loser_outcome_success"),
         numeric(train_summary, "data/train_winner_minus_loser_task_success"),
         numeric(train_summary, "data/train_winner_minus_loser_state_action_sequence_match"),
@@ -206,14 +221,19 @@ def best_agentic_signal_delta(positive_best: float | None, error_best: float | N
     return max(candidates) if candidates else None
 
 
-def stage_success_map(path: Path, *, metric: str = "outcome_success") -> dict[str, bool]:
+def stage_success_map(path: Path, *, metric: str = "retail_task_success") -> dict[str, bool]:
     rows = compare_checkpoints.read_jsonl(path)
     success: dict[str, bool] = {}
     for index, row in enumerate(rows):
         scenario_id = str(row.get("scenario_id") or f"row-{index}")
         metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
         try:
-            value = float(metrics.get(metric, 0.0))  # type: ignore[union-attr]
+            value = float(
+                metrics.get(
+                    metric,
+                    metrics.get("proxy_tau2_success", metrics.get("outcome_success", 0.0)),
+                )
+            )
         except Exception:
             value = 0.0
         success[scenario_id] = success.get(scenario_id, False) or value >= 1.0
@@ -250,25 +270,25 @@ def success_churn(current: dict[str, bool], reference: dict[str, bool]) -> dict[
 
 
 def judge_sft(summary: dict[str, Any], baseline: dict[str, Any], criteria: Criteria) -> dict[str, Any]:
-    outcome_delta = delta(summary, baseline, "outcome_success")
-    task_delta = delta(summary, baseline, "task_success")
+    task_delta = delta(summary, baseline, "retail_task_success")
+    reference_path_delta = delta(summary, baseline, "reference_tool_sequence_exact_match")
     state_delta = delta(summary, baseline, "state_action_sequence_match")
     reward_delta = delta(summary, baseline, "reward")
     accepted = (
-        gte(outcome_delta, -criteria.sft_max_outcome_regression)
-        and gte(task_delta, -criteria.sft_max_task_regression)
+        gte(task_delta, -criteria.sft_max_proxy_success_regression)
+        and gte(reference_path_delta, -criteria.sft_max_reference_path_regression)
         and (
             gte(reward_delta, 0.0)
             or gte(state_delta, 0.0)
-            or gte(outcome_delta, 0.0)
             or gte(task_delta, 0.0)
+            or gte(reference_path_delta, 0.0)
         )
     )
     reasons: list[str] = []
-    if not gte(outcome_delta, -criteria.sft_max_outcome_regression):
-        reasons.append("outcome_success regressed from baseline")
-    if not gte(task_delta, -criteria.sft_max_task_regression):
-        reasons.append("task_success regressed from baseline")
+    if not gte(task_delta, -criteria.sft_max_proxy_success_regression):
+        reasons.append("retail_task_success regressed from baseline")
+    if not gte(reference_path_delta, -criteria.sft_max_reference_path_regression):
+        reasons.append("reference_tool_sequence_exact_match regressed from baseline")
     if accepted:
         reasons.append("SFT is a usable RL parent under the configured gate")
     return {
@@ -293,14 +313,14 @@ def judge_rl_with_churn(
     train_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     reward_delta = delta(summary, sft, "reward")
-    outcome_delta = delta(summary, sft, "outcome_success")
-    task_delta = delta(summary, sft, "task_success")
+    task_delta = delta(summary, sft, "retail_task_success")
+    reference_path_delta = delta(summary, sft, "reference_tool_sequence_exact_match")
     state_delta = delta(summary, sft, "state_action_sequence_match")
     bad_state_delta = delta(summary, sft, "bad_state_action")
     missing_delta = delta(summary, sft, "missing_state_action")
     performance_lift = (
-        gte(outcome_delta, criteria.rl_min_outcome_delta)
-        or gte(task_delta, criteria.rl_min_task_delta)
+        gte(task_delta, criteria.rl_min_outcome_delta)
+        or gte(reference_path_delta, criteria.rl_min_task_delta)
         or gte(state_delta, criteria.rl_min_state_action_delta)
     )
     error_lift = (
@@ -326,7 +346,7 @@ def judge_rl_with_churn(
     if not gte(reward_delta, criteria.rl_min_reward_delta):
         reasons.append("reward did not clear the RL delta gate")
     if not performance_lift:
-        reasons.append("no outcome/task/state-action lift over SFT")
+        reasons.append("no retail-task/reference-path/state-action lift over SFT")
     if not error_lift:
         reasons.append("no bad-state or missing-state error reduction over SFT")
     if not retention_ok:
@@ -341,6 +361,8 @@ def judge_rl_with_churn(
         "reference_stage": sft.get("stage"),
         "reason": "; ".join(reasons),
         "deltas": {key: delta(summary, sft, key) for key in PRIMARY_KEYS},
+        "retail_task_success_churn": churn or {},
+        "proxy_tau2_success_churn": churn or {},
         "outcome_success_churn": churn or {},
         "train_signal": train_signal,
     }
@@ -355,25 +377,25 @@ def markdown_report(
     lines = [
         "# Stage Acceptance Gate",
         "",
-        "This gate is intentionally conservative for workshop finalization. It is a diagnostic aid, not a replacement for inspecting Weave traces.",
+        "This gate checks whether each stage improves the retail agent on held-out evaluation metrics and train-time RL signal.",
         "",
         "## Criteria",
         "",
-        f"- SFT must not regress `outcome_success` by more than `{criteria.sft_max_outcome_regression:.4f}` or `task_success` by more than `{criteria.sft_max_task_regression:.4f}` versus baseline.",
+        f"- SFT must not regress `retail_task_success` by more than `{criteria.sft_max_proxy_success_regression:.4f}` or `reference_tool_sequence_exact_match` by more than `{criteria.sft_max_reference_path_regression:.4f}` versus baseline.",
         f"- RL must improve reward by at least `{criteria.rl_min_reward_delta:.4f}` versus SFT.",
-        f"- RL must improve at least one of outcome, task, or state-action sequence metrics versus SFT.",
+        f"- RL must improve at least one of retail task success, reference tool sequence, or state-action sequence metrics versus SFT.",
         f"- RL must reduce either bad-state or missing-state errors versus SFT.",
-        f"- RL must retain at least `{criteria.rl_min_retained_sft_outcome_success_rate:.4f}` of deterministic SFT `outcome_success` wins when SFT has any wins.",
+        f"- RL must retain at least `{criteria.rl_min_retained_sft_outcome_success_rate:.4f}` of deterministic SFT `retail_task_success` wins when SFT has any wins.",
         f"- When train metrics are available, RL must show mean train reward range of at least `{criteria.rl_min_train_reward_range:.4f}`, trainable group fraction of at least `{criteria.rl_min_trainable_group_fraction:.4f}`, and winner-minus-loser movement in an agentic metric of at least `{criteria.rl_min_train_agentic_delta:.4f}`.",
         "",
         "## Decisions",
         "",
-        "| stage | reference | decision | reason | delta_reward | delta_outcome | delta_task | delta_state_seq | delta_bad_state | delta_missing_state | retained_sft_wins | lost_sft_wins | new_wins | retention_rate | train_reward_range | trainable_groups | agentic_groups | reward_only_groups | train_agentic_delta |",
+        "| stage | reference | decision | reason | delta_reward | delta_retail_task_success | delta_reference_path | delta_state_seq | delta_bad_state | delta_missing_state | retained_sft_wins | lost_sft_wins | new_wins | retention_rate | train_reward_range | trainable_groups | agentic_groups | reward_only_groups | train_agentic_delta |",
         "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for decision in decisions:
         deltas = decision["deltas"]
-        churn = decision.get("outcome_success_churn") or {}
+        churn = decision.get("retail_task_success_churn") or decision.get("proxy_tau2_success_churn") or {}
         def fmt(key: str) -> str:
             value = deltas.get(key)
             return "" if value is None else f"{value:+.4f}"
@@ -398,8 +420,8 @@ def markdown_report(
                     str(decision["decision"]),
                     str(decision["reason"]),
                     fmt("reward"),
-                    fmt("outcome_success"),
-                    fmt("task_success"),
+                    fmt("retail_task_success"),
+                    fmt("reference_tool_sequence_exact_match"),
                     fmt("state_action_sequence_match"),
                     fmt("bad_state_action"),
                     fmt("missing_state_action"),
@@ -418,7 +440,7 @@ def markdown_report(
         )
     lines.extend(["", "## Stage Metrics", ""])
     lines.append(
-        "| stage | rows | reward | outcome_success | task_success | state_action_sequence_match | bad_state_action | missing_state_action |"
+        "| stage | rows | reward | retail_task_success | reference_tool_sequence_exact_match | state_action_sequence_match | bad_state_action | missing_state_action |"
     )
     lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for summary in summaries:
@@ -433,8 +455,8 @@ def markdown_report(
                     str(summary.get("stage")),
                     str(summary.get("rows", "")),
                     metric("reward"),
-                    metric("outcome_success"),
-                    metric("task_success"),
+                    metric("retail_task_success"),
+                    metric("reference_tool_sequence_exact_match"),
                     metric("state_action_sequence_match"),
                     metric("bad_state_action"),
                     metric("missing_state_action"),
@@ -477,8 +499,8 @@ def main() -> None:
     if len(args.stages) != len(args.paths):
         raise SystemExit("--stages must have the same length as paths")
     criteria = Criteria(
-        sft_max_outcome_regression=args.sft_max_outcome_regression,
-        sft_max_task_regression=args.sft_max_task_regression,
+        sft_max_proxy_success_regression=args.sft_max_outcome_regression,
+        sft_max_reference_path_regression=args.sft_max_task_regression,
         rl_min_reward_delta=args.rl_min_reward_delta,
         rl_min_outcome_delta=args.rl_min_outcome_delta,
         rl_min_task_delta=args.rl_min_task_delta,

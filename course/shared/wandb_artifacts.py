@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -9,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .config import RetailCourseConfig
+from .tracing import bind_weave_to_active_wandb_run, clear_weave_wandb_run_context
 
 
 def artifact_safe_name(name: str) -> str:
@@ -107,11 +109,237 @@ def wandb_disabled() -> bool:
     return os.getenv("WANDB_MODE", "").strip().lower() == "disabled"
 
 
+def _env_value(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _safe_tag_value(value: str) -> str:
+    return artifact_safe_name(value).lower()
+
+
+def _infer_stage(config: RetailCourseConfig, job_type: str) -> str:
+    explicit = _env_value("COURSE_RUN_STAGE")
+    if explicit:
+        return explicit
+    normalized_job = job_type.strip().lower()
+    model_name = config.model_name.lower()
+    if normalized_job in {"sft", "grpo", "gspo", "ruler-grpo"}:
+        return f"{normalized_job}-train"
+    if normalized_job == "eval":
+        if "baseline" in model_name:
+            return "baseline-eval"
+        if "sft" in model_name:
+            return "sft-eval"
+        if "ruler" in model_name:
+            return "ruler-grpo-eval"
+        if "gspo" in model_name:
+            return "gspo-eval"
+        if "grpo" in model_name:
+            return "grpo-eval"
+        return "checkpoint-eval"
+    if normalized_job == "data-artifact":
+        return "data-artifact"
+    if normalized_job == "eval-comparison":
+        return "checkpoint-comparison"
+    if normalized_job == "weave-cached-eval":
+        return "cached-eval"
+    if normalized_job == "registry-link":
+        return "registry-link"
+    if normalized_job == "upload-lora":
+        return "upload-lora"
+    if normalized_job == "smoke":
+        return "setup-smoke"
+    return normalized_job or "run"
+
+
+def _infer_kind(job_type: str, stage: str) -> str:
+    explicit = _env_value("COURSE_RUN_KIND")
+    if explicit:
+        return explicit
+    normalized_job = job_type.strip().lower()
+    normalized_stage = stage.strip().lower()
+    if normalized_job in {"sft", "grpo", "gspo", "ruler-grpo"}:
+        return "training"
+    if normalized_job in {"eval", "weave-eval", "weave-cached-eval"} or normalized_stage.endswith("eval"):
+        return "eval"
+    if normalized_job == "eval-comparison":
+        return "comparison"
+    if normalized_job == "data-artifact":
+        return "data"
+    if normalized_job in {"registry-link"}:
+        return "registry"
+    if normalized_job in {"upload-lora", "model-checkpoint"}:
+        return "artifact"
+    if normalized_job == "smoke":
+        return "setup"
+    return normalized_job or "run"
+
+
+def _infer_algorithm(job_type: str, stage: str) -> str | None:
+    explicit = _env_value("COURSE_RUN_ALGO")
+    if explicit:
+        return explicit
+    combined = f"{job_type} {stage}".lower()
+    if "ruler" in combined:
+        return "ruler-grpo"
+    if "gspo" in combined:
+        return "gspo"
+    if "grpo" in combined:
+        return "grpo"
+    if "sft" in combined:
+        return "sft"
+    return None
+
+
+def wandb_run_context(config: RetailCourseConfig, job_type: str) -> dict[str, str]:
+    stage = _infer_stage(config, job_type)
+    kind = _infer_kind(job_type, stage)
+    context = {
+        "stage": stage,
+        "kind": kind,
+        "job_type": job_type,
+        "art_model_name": config.model_name,
+        "base_model": config.base_model,
+        "model_profile": config.model_profile,
+        "dataset_id": config.dataset_id,
+        "weave_project": os.getenv("WEAVE_PROJECT") or config.project,
+    }
+    optional_values = {
+        "algorithm": _infer_algorithm(job_type, stage),
+        "split": _env_value("COURSE_RUN_SPLIT"),
+        "run_profile": _env_value("COURSE_RUN_PROFILE"),
+        "run_slug": _env_value("COURSE_RUN_SLUG"),
+        "reward_profile": _env_value("RETAIL_REWARD_PROFILE"),
+        "slurm_job_id": _env_value("SLURM_JOB_ID"),
+    }
+    for key, value in optional_values.items():
+        if value:
+            context[key] = value
+    return context
+
+
+def default_wandb_tags(config: RetailCourseConfig, job_type: str) -> list[str]:
+    context = wandb_run_context(config, job_type)
+    tags = [
+        f"stage:{_safe_tag_value(context['stage'])}",
+        f"kind:{_safe_tag_value(context['kind'])}",
+    ]
+    if "algorithm" in context:
+        tags.append(f"algo:{_safe_tag_value(context['algorithm'])}")
+    if "split" in context:
+        tags.append(f"split:{_safe_tag_value(context['split'])}")
+    if "run_profile" in context:
+        tags.append(f"profile:{_safe_tag_value(context['run_profile'])}")
+    if "reward_profile" in context and context["kind"] in {"training", "eval", "comparison"}:
+        tags.append(f"reward:{_safe_tag_value(context['reward_profile'])}")
+    if "slurm_job_id" in context:
+        tags.append(f"slurm:{_safe_tag_value(context['slurm_job_id'])}")
+    return list(dict.fromkeys(tags))
+
+
+def default_wandb_notes(config: RetailCourseConfig, job_type: str) -> str:
+    context = wandb_run_context(config, job_type)
+    stage = context["stage"]
+    purpose_by_stage = {
+        "data-artifact": "Log the retail dataset and SFT files as versioned W&B Artifacts.",
+        "baseline-eval": "Evaluate the base model before SFT or RL.",
+        "sft-train": "Train the next-action SFT anchor checkpoint.",
+        "sft-eval": "Evaluate the SFT anchor checkpoint.",
+        "grpo-train": "Run GRPO from the SFT anchor checkpoint.",
+        "gspo-train": "Run GSPO from the SFT anchor checkpoint.",
+        "ruler-grpo-train": "Run GRPO with a hybrid RULER reward from the SFT anchor checkpoint.",
+        "checkpoint-comparison": "Compare baseline, SFT, and RL checkpoint metrics in a W&B Table.",
+        "cached-eval": "Publish cached rollout results as a Weave Evaluation and companion W&B Table.",
+        "setup-smoke": "Verify that W&B metrics and Weave calls are linked to the same W&B Run.",
+        "registry-link": "Link a model artifact to W&B Registry.",
+        "upload-lora": "Upload a local LoRA checkpoint as a W&B model artifact.",
+    }
+    purpose = purpose_by_stage.get(stage)
+    if purpose is None:
+        if stage.startswith("cached-eval"):
+            purpose = "Publish cached rollout results as a Weave Evaluation and companion W&B Table."
+        elif stage.endswith("-eval"):
+            purpose = f"Evaluate the {stage.removesuffix('-eval')} checkpoint."
+        elif stage.endswith("-train"):
+            purpose = f"Train the {stage.removesuffix('-train')} checkpoint."
+        else:
+            purpose = "Run one step of the retail support agent training pipeline."
+    optional_lines = [
+        ("Algorithm", "algorithm"),
+        ("Split", "split"),
+        ("Run profile", "run_profile"),
+        ("Run slug", "run_slug"),
+        ("Reward profile", "reward_profile"),
+        ("Slurm job", "slurm_job_id"),
+    ]
+    context_lines = [f"{label}: {context[key]}" for label, key in optional_lines if key in context]
+    return "\n".join(
+        [
+            purpose,
+            f"Stage: {context['stage']}",
+            f"Kind: {context['kind']}",
+            f"Job type: {job_type}",
+            *context_lines,
+            f"ART model: {context['art_model_name']}",
+            f"Base model: {context['base_model']}",
+            f"Model profile: {context['model_profile']}",
+            f"Dataset: {context['dataset_id']}",
+            f"Weave project: {context['weave_project']}",
+            "",
+            "When Weave tracing is enabled, calls are bound to the W&B-generated run.id for this run.",
+        ]
+    )
+
+
+def apply_wandb_run_metadata(
+    run: Any,
+    config: RetailCourseConfig,
+    *,
+    job_type: str,
+    tags: Iterable[str] = (),
+    notes: str | None = None,
+) -> None:
+    context = wandb_run_context(config, job_type)
+    tag_list = list(dict.fromkeys([*default_wandb_tags(config, job_type), *tags]))
+    try:
+        run.tags = tuple(tag_list)
+    except Exception:
+        pass
+    try:
+        run.notes = notes or default_wandb_notes(config, job_type)
+    except Exception:
+        pass
+    try:
+        run.config.update(
+            {
+                "course": "openpipe-art-retail",
+                "job_type": job_type,
+                "stage": context["stage"],
+                "kind": context["kind"],
+                "art_model_name": config.model_name,
+                "base_model": config.base_model,
+                "model_profile": config.model_profile,
+                "dataset_id": config.dataset_id,
+                "weave_project": os.getenv("WEAVE_PROJECT") or config.project,
+                "git_commit": current_git_commit(),
+                **{key: context[key] for key in ("algorithm", "split", "run_profile", "run_slug", "reward_profile", "slurm_job_id") if key in context},
+            },
+            allow_val_change=True,
+        )
+    except Exception:
+        pass
+
+
 def ensure_wandb_run(
     config: RetailCourseConfig,
     *,
     job_type: str,
-    run_name: str | None = None,
+    tags: Iterable[str] = (),
+    notes: str | None = None,
 ) -> tuple[Any | None, bool]:
     if wandb_disabled():
         return None, False
@@ -120,21 +348,65 @@ def ensure_wandb_run(
     except ImportError:
         return None, False
     if wandb.run is not None:
+        apply_wandb_run_metadata(wandb.run, config, job_type=job_type, tags=tags, notes=notes)
+        bind_weave_to_active_wandb_run()
         return wandb.run, False
     run = wandb.init(
         project=config.project,
         entity=config.entity,
         job_type=job_type,
-        name=run_name or config.model_name,
-        id=os.getenv("WANDB_RUN_ID"),
-        resume="allow",
+        tags=list(dict.fromkeys([*default_wandb_tags(config, job_type), *tags])),
+        notes=notes or default_wandb_notes(config, job_type),
+        config={
+            "course": "openpipe-art-retail",
+            "job_type": job_type,
+            **wandb_run_context(config, job_type),
+            "git_commit": current_git_commit(),
+        },
     )
+    bind_weave_to_active_wandb_run()
     return run, True
 
 
 def finish_wandb_run(run: Any | None, owned: bool) -> None:
     if run is not None and owned:
+        clear_weave_wandb_run_context(getattr(run, "id", None))
         run.finish()
+
+
+def _wandb_metric_value(value: Any) -> float | int | None:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    try:
+        numeric = float(value)
+    except Exception:
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def log_wandb_metrics(
+    config: RetailCourseConfig,
+    metrics: dict[str, Any],
+    *,
+    job_type: str,
+    step: int | None = None,
+) -> None:
+    run, _ = ensure_wandb_run(config, job_type=job_type)
+    if run is None:
+        return
+    payload: dict[str, float | int] = {}
+    for key, value in metrics.items():
+        numeric = _wandb_metric_value(value)
+        if numeric is not None:
+            payload[key] = numeric
+    if step is not None:
+        payload["training_step"] = int(step)
+    if payload:
+        run.log(payload)
 
 
 def use_wandb_artifact(
@@ -251,7 +523,13 @@ def log_checkpoint_artifact(
     except ImportError:
         print("W&B unavailable; skipping checkpoint artifact logging.")
         return None
-    run, _ = ensure_wandb_run(config, job_type=job_type)
+    if wandb_disabled():
+        print("W&B disabled; skipping checkpoint artifact logging.")
+        return None
+    if wandb.run is not None:
+        run = wandb.run
+    else:
+        run, _ = ensure_wandb_run(config, job_type=job_type)
     if run is None:
         print("W&B disabled; skipping checkpoint artifact logging.")
         return None
@@ -321,7 +599,7 @@ def log_retail_data_artifact(
     run, owned = ensure_wandb_run(
         config,
         job_type="data-artifact",
-        run_name=f"{artifact_safe_name(artifact_name)}-data",
+        tags=[f"artifact:{artifact_safe_name(artifact_name)}"],
     )
     if run is None:
         print("W&B disabled; skipping data artifact logging.")

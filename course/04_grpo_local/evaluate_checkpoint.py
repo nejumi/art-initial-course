@@ -17,7 +17,57 @@ from course.shared.retail_env import choice_to_message
 from course.shared.rewards import REWARD_PROFILES
 from course.shared.rollout import rollout_retail
 from course.shared.tracing import init_weave
-from course.shared.wandb_artifacts import use_wandb_artifact
+from course.shared.wandb_artifacts import ensure_wandb_run, finish_wandb_run, log_wandb_metrics, use_wandb_artifact
+
+
+SUMMARY_METRICS = [
+    "course_eval_score",
+    "retail_task_success",
+    "proxy_tau2_success",
+    "reference_tool_sequence_exact_match",
+    "state_action_sequence_match",
+    "valid_state_action_rate",
+    "communication_success",
+    "bad_state_action",
+    "missing_state_action",
+    "truncated_by_max_turn",
+]
+
+
+def mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else float("nan")
+
+
+def summarize_eval_rows(rows: list[dict[str, object]]) -> dict[str, float | int]:
+    rewards: list[float] = []
+    metrics: dict[str, list[float]] = {key: [] for key in SUMMARY_METRICS}
+    for row in rows:
+        try:
+            rewards.append(float(row.get("reward")))  # type: ignore[arg-type]
+        except Exception:
+            pass
+        row_metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+        for key in SUMMARY_METRICS:
+            try:
+                value = row_metrics.get(key)  # type: ignore[union-attr]
+                if value is None and key == "retail_task_success":
+                    value = row_metrics.get("outcome_success")  # type: ignore[union-attr]
+                if value is None and key == "reference_tool_sequence_exact_match":
+                    value = row_metrics.get("task_success")  # type: ignore[union-attr]
+                if value is not None:
+                    metrics[key].append(float(value))
+            except Exception:
+                continue
+    summary: dict[str, float | int] = {
+        "eval/rows": len(rows),
+        "eval/scenarios": len({str(row.get("scenario_id")) for row in rows}),
+    }
+    if rewards:
+        summary["eval/reward"] = mean(rewards)
+    for key, values in metrics.items():
+        if values:
+            summary[f"eval/{key}"] = mean(values)
+    return summary
 
 
 async def main_async() -> None:
@@ -41,8 +91,11 @@ async def main_async() -> None:
     if args.reward_profile:
         os.environ["RETAIL_REWARD_PROFILE"] = args.reward_profile
     cfg = config_from_env()
+    wandb_run = None
+    owned_wandb_run = False
     if args.weave:
-        init_weave(cfg.project)
+        wandb_run, owned_wandb_run = ensure_wandb_run(cfg, job_type="eval")
+        init_weave()
     data_dir = Path(args.data_dir)
     if not (data_dir / f"{args.split}.jsonl").exists():
         write_sample_dataset(data_dir)
@@ -110,6 +163,9 @@ async def main_async() -> None:
             groups.append(art.TrajectoryGroup(trajectories))
     await model.log(groups, split="val")
     write_jsonl(args.output, rows)
+    if args.weave:
+        log_wandb_metrics(cfg, summarize_eval_rows(rows), job_type="eval")
+        finish_wandb_run(wandb_run, owned_wandb_run)
     print(f"Wrote {len(rows)} eval rows to {args.output}")
 
 

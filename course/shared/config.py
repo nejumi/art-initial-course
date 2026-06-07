@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COURSE_DOTENV_PATH = PROJECT_ROOT / ".env"
+COURSE_RUN_CONFIG_PATH = PROJECT_ROOT / "course" / "09_runbooks" / "config.yaml"
+COURSE_BASE_CONFIG_PATH = PROJECT_ROOT / "course" / "09_runbooks" / "base_config.yaml"
+IGNORE_RUN_CONFIG_ENV = "COURSE_IGNORE_RUN_CONFIG"
 
 
 def load_course_dotenv() -> bool:
@@ -53,13 +58,117 @@ MODEL_PROFILE_NOTES: dict[str, str] = {
 }
 
 
+def env_truthy(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def load_yaml_mapping(path: Path) -> dict[str, Any]:
+    try:
+        import yaml
+    except ImportError:
+        return {}
+    if not path.exists():
+        return {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return data if isinstance(data, dict) else {}
+
+
+@lru_cache(maxsize=1)
+def run_config() -> dict[str, Any]:
+    if env_truthy(IGNORE_RUN_CONFIG_ENV):
+        return {}
+    return load_yaml_mapping(COURSE_RUN_CONFIG_PATH)
+
+
+@lru_cache(maxsize=1)
+def base_config() -> dict[str, Any]:
+    if env_truthy(IGNORE_RUN_CONFIG_ENV):
+        return {}
+    return load_yaml_mapping(COURSE_BASE_CONFIG_PATH)
+
+
+def nonempty_config_value(key: str) -> Any | None:
+    value = run_config().get(key)
+    if value is None or value == "":
+        return None
+    return value
+
+
+def run_config_overrides() -> dict[str, Any]:
+    overrides = run_config().get("overrides") or {}
+    return overrides if isinstance(overrides, dict) else {}
+
+
+def gpu_memory_preset_values() -> dict[str, Any]:
+    preset_name = nonempty_config_value("gpu_memory_preset")
+    if not preset_name or preset_name == "standard":
+        return {}
+    presets = base_config().get("gpu_memory_presets") or {}
+    if not isinstance(presets, dict):
+        return {}
+    preset = presets.get(str(preset_name)) or {}
+    return preset if isinstance(preset, dict) else {}
+
+
+def run_config_runtime_values() -> dict[str, Any]:
+    values = dict(gpu_memory_preset_values())
+    values.update(run_config_overrides())
+    return values
+
+
+def runtime_value(key: str) -> Any | None:
+    value = run_config_runtime_values().get(key)
+    if value is None or value == "":
+        return None
+    return value
+
+
+def optional_int_config(key: str) -> int | None:
+    value = runtime_value(key)
+    return int(value) if value is not None else None
+
+
+def optional_float_config(key: str) -> float | None:
+    value = runtime_value(key)
+    return float(value) if value is not None else None
+
+
+def configured_model_profile() -> str | None:
+    profile = nonempty_config_value("model_profile")
+    if profile is None or profile == "from_env":
+        return None
+    return str(profile)
+
+
+def configured_base_model() -> str | None:
+    base_model = nonempty_config_value("base_model")
+    if base_model is not None:
+        return str(base_model)
+    profile = configured_model_profile()
+    if profile is None:
+        return None
+    if profile == "custom":
+        raise ValueError("course/09_runbooks/config.yaml uses model_profile: custom, so base_model must be set.")
+    try:
+        return MODEL_PROFILES[profile]
+    except KeyError as exc:
+        allowed = ", ".join(["custom", *sorted(MODEL_PROFILES)])
+        raise ValueError(f"Unknown model_profile={profile!r} in course/09_runbooks/config.yaml. Use one of: {allowed}.") from exc
+
+
 def model_profile_from_env() -> str:
+    configured = configured_model_profile()
+    if configured is not None:
+        return configured
     if os.getenv("ART_BASE_MODEL") and "ART_MODEL_PROFILE" not in os.environ:
         return "custom"
     return os.getenv("ART_MODEL_PROFILE", DEFAULT_MODEL_PROFILE)
 
 
 def resolve_base_model() -> str:
+    configured = configured_base_model()
+    if configured is not None:
+        return configured
     explicit = os.getenv("ART_BASE_MODEL")
     if explicit:
         return explicit
@@ -129,7 +238,7 @@ def default_tool_call_parser(base_model: str | None = None) -> str | None:
     if explicit is not None:
         value = explicit.strip()
         return value or None
-    model_name = base_model or os.getenv("ART_BASE_MODEL") or resolve_base_model()
+    model_name = base_model or resolve_base_model()
     model_name_lower = model_name.lower()
     if "liquidai/lfm" in model_name_lower or "lfm2" in model_name_lower:
         return "lfm2"
@@ -162,13 +271,37 @@ class RetailCourseConfig:
     inference_base_url: str | None = field(default_factory=lambda: os.getenv("INFERENCE_BASE_URL"))
     inference_api_key: str | None = field(default_factory=lambda: os.getenv("INFERENCE_API_KEY") or os.getenv("OPENAI_API_KEY"))
     request_logprobs: bool = field(default_factory=lambda: bool_env("ART_REQUEST_LOGPROBS", True))
-    rollout_max_completion_tokens: int = field(default_factory=lambda: optional_int_env("ART_ROLLOUT_MAX_COMPLETION_TOKENS") or 512)
+    rollout_max_completion_tokens: int = field(
+        default_factory=lambda: optional_int_config("max_completion_tokens")
+        or optional_int_env("ART_ROLLOUT_MAX_COMPLETION_TOKENS")
+        or 512
+    )
     tool_call_parser: str | None = field(default_factory=default_tool_call_parser)
-    art_max_seq_length: int | None = field(default_factory=lambda: optional_int_env("ART_MAX_SEQ_LENGTH") or DEFAULT_ART_MAX_SEQ_LENGTH)
-    vllm_max_model_len: int | None = field(default_factory=lambda: optional_int_env("ART_VLLM_MAX_MODEL_LEN") or DEFAULT_VLLM_MAX_MODEL_LEN)
-    vllm_gpu_memory_utilization: float | None = field(default_factory=lambda: optional_float_env("ART_VLLM_GPU_MEMORY_UTILIZATION") or DEFAULT_VLLM_GPU_MEMORY_UTILIZATION)
-    vllm_max_num_batched_tokens: int | None = field(default_factory=lambda: optional_int_env("ART_VLLM_MAX_NUM_BATCHED_TOKENS") or DEFAULT_VLLM_MAX_NUM_BATCHED_TOKENS)
-    vllm_max_num_seqs: int | None = field(default_factory=lambda: optional_int_env("ART_VLLM_MAX_NUM_SEQS") or DEFAULT_VLLM_MAX_NUM_SEQS)
+    art_max_seq_length: int | None = field(
+        default_factory=lambda: optional_int_config("art_seq_length")
+        or optional_int_env("ART_MAX_SEQ_LENGTH")
+        or DEFAULT_ART_MAX_SEQ_LENGTH
+    )
+    vllm_max_model_len: int | None = field(
+        default_factory=lambda: optional_int_config("vllm_max_model_len")
+        or optional_int_env("ART_VLLM_MAX_MODEL_LEN")
+        or DEFAULT_VLLM_MAX_MODEL_LEN
+    )
+    vllm_gpu_memory_utilization: float | None = field(
+        default_factory=lambda: optional_float_config("vllm_gpu_memory_utilization")
+        or optional_float_env("ART_VLLM_GPU_MEMORY_UTILIZATION")
+        or DEFAULT_VLLM_GPU_MEMORY_UTILIZATION
+    )
+    vllm_max_num_batched_tokens: int | None = field(
+        default_factory=lambda: optional_int_config("vllm_max_num_batched_tokens")
+        or optional_int_env("ART_VLLM_MAX_NUM_BATCHED_TOKENS")
+        or DEFAULT_VLLM_MAX_NUM_BATCHED_TOKENS
+    )
+    vllm_max_num_seqs: int | None = field(
+        default_factory=lambda: optional_int_config("vllm_max_num_seqs")
+        or optional_int_env("ART_VLLM_MAX_NUM_SEQS")
+        or DEFAULT_VLLM_MAX_NUM_SEQS
+    )
     vllm_enforce_eager: bool | None = field(default_factory=lambda: optional_bool_env("ART_VLLM_ENFORCE_EAGER"))
     terminate_on_invalid: bool = field(default_factory=terminate_on_invalid_from_env)
     allow_reference_state_action_jumps: bool = field(

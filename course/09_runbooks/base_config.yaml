@@ -136,6 +136,7 @@ profiles:
       rl_groups_per_step: 8
       rl_rollouts_per_scenario: 8
       rl_learning_rate: 0.000001
+      eval_rl_candidates: true
       max_completion_tokens: 768
       art_seq_length: 16384
       vllm_gpu_memory_utilization: 0.7
@@ -166,6 +167,7 @@ profiles:
       rl_groups_per_step: 8
       rl_rollouts_per_scenario: 8
       rl_learning_rate: 0.000001
+      eval_rl_candidates: true
       max_completion_tokens: 768
       art_seq_length: 16384
       vllm_gpu_memory_utilization: 0.7

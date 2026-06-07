@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -94,6 +95,29 @@ def artifact_uri(name: str, alias: str = "latest") -> str:
 
 def retail_model_name(run_slug: str, stage: str) -> str:
     return f"retail-support-agent-{run_slug}-{stage}"
+
+
+def candidate_model_name(branch_model: str, step: int) -> str:
+    return f"{branch_model}-candidate-step{step:04d}"
+
+
+def read_top_candidate_step(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    candidates = data.get("candidates") if isinstance(data, dict) else None
+    if not isinstance(candidates, list) or not candidates:
+        return None
+    step = candidates[0].get("step") if isinstance(candidates[0], dict) else None
+    return int(step) if step is not None else None
+
+
+def candidate_step_from_eval_path(path: Path) -> int | None:
+    marker = "_candidate_step"
+    if marker not in path.stem:
+        return None
+    raw = path.stem.split(marker, 1)[1].split("_", 1)[0]
+    return int(raw) if raw.isdigit() else None
 
 
 def split_csv(value: str) -> list[str]:
@@ -643,6 +667,7 @@ def train_rl_branch(
     command += weave_args(args)
     run_command(f"{algo.upper()} training", command, env=branch_train_env, dry_run=args.dry_run)
     if args.select_rl_candidates:
+        candidate_json = report_dir / f"{algo}_{args.rl_suffix}_checkpoint_candidates.json"
         run_command(
             f"select {algo} checkpoint candidates",
             [
@@ -657,7 +682,7 @@ def train_rl_branch(
                 "--output-md",
                 path_arg(report_dir / f"{algo}_{args.rl_suffix}_checkpoint_candidates.md"),
                 "--output-json",
-                path_arg(report_dir / f"{algo}_{args.rl_suffix}_checkpoint_candidates.json"),
+                path_arg(candidate_json),
             ],
             env=stage_env(
                 {**env, "ART_MODEL_NAME": branch_model},
@@ -667,6 +692,86 @@ def train_rl_branch(
             ),
             dry_run=args.dry_run,
         )
+        top_step = args.rl_steps if args.dry_run else read_top_candidate_step(candidate_json)
+        if args.eval_rl_candidates and top_step is not None:
+            candidate_model = candidate_model_name(branch_model, top_step)
+            candidate_artifact = f"{candidate_model}-checkpoint"
+            step_label = f"{top_step:04d}"
+            candidate_env = {
+                **stage_env(env, stage=f"{algo}-candidate-step{step_label}", kind="artifact", algo=algo),
+                "ART_MODEL_NAME": candidate_model,
+            }
+            run_command(
+                f"fork {algo} candidate checkpoint step {step_label}",
+                [
+                    sys.executable,
+                    "-B",
+                    "course/08_enterprise_ops/fork_checkpoint.py",
+                    "--from-model",
+                    branch_model,
+                    "--to-model",
+                    candidate_model,
+                    "--not-after-step",
+                    str(top_step),
+                    "--file-only",
+                    "--overwrite",
+                    "--verbose",
+                ],
+                env=candidate_env,
+                dry_run=args.dry_run,
+            )
+            run_command(
+                f"log {algo} candidate checkpoint artifact step {step_label}",
+                [
+                    sys.executable,
+                    "-B",
+                    "course/07_models_registry_weave/log_checkpoint_artifact.py",
+                    "--model-name",
+                    candidate_model,
+                    "--stage",
+                    f"{algo}-candidate-step{step_label}",
+                    "--artifact-name",
+                    candidate_artifact,
+                    "--alias",
+                    "validation-candidate",
+                    "--metadata",
+                    f"algorithm={json.dumps(algo)}",
+                    "--metadata",
+                    f"source_model={json.dumps(branch_model)}",
+                    "--metadata",
+                    f"source_step={top_step}",
+                    "--metadata",
+                    f"selection_metric={json.dumps(args.rl_candidate_metric)}",
+                    "--metadata",
+                    f"data_artifact={json.dumps(artifact_uri(args.data_artifact_name))}",
+                ],
+                env=candidate_env,
+                dry_run=args.dry_run,
+            )
+            candidate_validation_env = {
+                **stage_env(
+                    env,
+                    stage=f"{algo}-candidate-validation-eval",
+                    kind="eval",
+                    algo=algo,
+                    split=args.eval_split,
+                ),
+                "ART_MODEL_NAME": candidate_model,
+            }
+            run_command(
+                f"eval {algo} candidate step {step_label} validation",
+                evaluate_command(
+                    args,
+                    data_dir=args.data_dir,
+                    split=args.eval_split,
+                    limit=args.eval_limit,
+                    output=report_dir / f"eval_{algo}_{args.rl_suffix}_candidate_step{step_label}_validation.jsonl",
+                    model_artifact=artifact_uri(candidate_artifact, "validation-candidate"),
+                    include_messages=True,
+                ),
+                env=candidate_validation_env,
+                dry_run=args.dry_run,
+            )
     branch_train_eval_env = {
         **stage_env(env, stage=f"{algo}-train-subset-eval", kind="eval", algo=algo, split=args.rl_split),
         "ART_MODEL_NAME": branch_model,
@@ -739,6 +844,17 @@ def compare_results(
             paths.append(path_arg(eval_path))
             stages.append(f"{algo}_{args.rl_suffix}")
             model_artifacts.append(artifact_uri(f"{branch_model}-checkpoint"))
+        candidate_paths = sorted(report_dir.glob(f"eval_{algo}_{args.rl_suffix}_candidate_step*_validation.jsonl"))
+        if args.dry_run and args.eval_rl_candidates:
+            candidate_paths = [report_dir / f"eval_{algo}_{args.rl_suffix}_candidate_step{args.rl_steps:04d}_validation.jsonl"]
+        for candidate_path in candidate_paths:
+            candidate_step = candidate_step_from_eval_path(candidate_path)
+            if candidate_step is None:
+                continue
+            candidate_model = candidate_model_name(branch_model, candidate_step)
+            paths.append(path_arg(candidate_path))
+            stages.append(f"{algo}_{args.rl_suffix}_candidate_step{candidate_step:04d}")
+            model_artifacts.append(artifact_uri(f"{candidate_model}-checkpoint", "validation-candidate"))
     if len(paths) < 2:
         print("Skipping comparison because fewer than two eval outputs are available.")
         return
@@ -925,6 +1041,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--rl-candidate-metric", default="data/step_course_score_mean")
     parser.add_argument("--rl-candidate-top-k", type=int, default=3)
+    parser.add_argument(
+        "--eval-rl-candidates",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="After candidate selection, fork and evaluate the top selected RL checkpoint on validation.",
+    )
     parser.add_argument("--ruler-judge-model", default="openai/gpt-5.5")
     parser.add_argument("--ruler-judge-effort", default="medium", choices=["low", "medium", "high", "xhigh"])
     parser.add_argument("--ruler-weight", type=float, default=0.3)

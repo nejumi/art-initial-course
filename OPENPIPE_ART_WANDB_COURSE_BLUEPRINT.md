@@ -74,21 +74,21 @@ API smoke test:
 - 各章は「10-20分の座学 -> 20-45分のハンズオン -> W&B/Weaveで観察 -> 設計判断ディスカッション」の型で進める。
 - 受講者はGPUに応じて2つの演習トラックを選ぶ。
 
-### 3.1 90分デリバリー版
+### 3.1 短時間デリバリー版
 
-90分デリバリーの現実的な北極星は「その場で長期RLを完走する」ではなく、「W&B Models / Weave / ARTでagentic SFT/RLをどう設計・観測・検証するかを理解し、短い実行で初期信号を見て、フル検証済み結果で有効性を確認する」こと。
+短時間デリバリーの現実的な北極星は「その場で長期RLを完走する」ではなく、「W&B Models / Weave / ARTでagentic SFT/RLをどう設計・観測・検証するかを理解し、短い実行で初期信号を見て、フル検証済み結果で有効性を確認する」こと。尺は顧客・GPU・事前準備状況に合わせて調整する。
 
-90分の推奨配分:
+推奨セグメント:
 
-| 時間 | 内容 | その場で動かすもの | 見せる証拠 |
-| ---: | --- | --- | --- |
-| 0-10分 | W&B Models / Weave復習 | W&B project, Artifact, Weave traceを開く | dataset artifact, SFT checkpoint artifact, trace例 |
-| 10-20分 | ART概念マップ | `Scenario -> rollout -> TrajectoryGroup -> train` の最小コード確認 | W&B metricsとWeave traceの対応 |
-| 20-35分 | Retail taskと評価指標 | cached eval JSONL / Weave Evaluationを見る | `task_success` と `outcome_success` の違い |
-| 35-50分 | SFT warm start | 小モデルまたはdry-runでSFT commandを実行 | SFT loss curve、checkpoint artifact lineage |
-| 50-70分 | GRPO/GSPO/RULERの考え方 | 可能なら1-2 stepの短いGRPO smoke | group reward range、winner-minus-loser、dropped no-signal groups |
-| 70-82分 | フル検証済みH100結果 | 事前runのW&B table / Weave tracesを読む | held-out validationでSFT/RLが改善した表 |
-| 82-90分 | Enterprise運用設計 | Dedicated Cloud / Self-Managed / LocalBackend比較 | Registry昇格、Artifact lineage、再現性チェックリスト |
+| セグメント | 内容 | その場で動かすもの | 見せる証拠 |
+| --- | --- | --- | --- |
+| Opening | W&B Models / Weave復習 | W&B project, Artifact, Weave traceを開く | dataset artifact, SFT checkpoint artifact, trace例 |
+| ART primitives | ART概念マップ | `Scenario -> rollout -> TrajectoryGroup -> train` の最小コード確認 | W&B metricsとWeave traceの対応 |
+| Task and evals | Retail taskと評価指標 | cached eval JSONL / Weave Evaluationを見る | `task_success` と `outcome_success` の違い |
+| SFT warm start | SFT warm start | 小モデルまたはdry-runでSFT commandを実行 | SFT loss curve、checkpoint artifact lineage |
+| Agentic RL | GRPO/GSPO/RULERの考え方 | 可能なら短いGRPO smoke | group reward range、winner-minus-loser、dropped no-signal groups |
+| Verified results | フル検証済みH100結果 | 事前runのW&B table / Weave tracesを読む | held-out validationでSFT/RLが改善した表 |
+| Enterprise wrap-up | Enterprise運用設計 | Dedicated Cloud / Self-Managed / LocalBackend比較 | Registry昇格、Artifact lineage、再現性チェックリスト |
 
 実行トラック:
 
@@ -97,7 +97,7 @@ API smoke test:
 - H100 1枚: `LiquidAI/LFM2.5-8B-A1B` で短いSFTと数stepのGRPOを実行し、初期上昇やreward varianceを観測する。長期runは宿題または講師事前runにする。
 - H100複数枚: SFT parentからGRPO/GSPO/RULERを独立分岐で並列実行し、checkpoint candidate selectionとheld-out evalまで行う。
 
-この90分版では、嘘をつかないために次を明確に言う:
+この短時間版では、嘘をつかないために次を明確に言う:
 
 - 小モデルや短時間runは操作手順と初期信号を見るためのもの。
 - 「Agentic RLが有効」と言える根拠は、講師側で事前にH100フル検証したheld-out validation、W&B Artifact lineage、Weave traceで示す。

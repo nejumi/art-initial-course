@@ -53,30 +53,29 @@
 - tau-dev-task-retail-v1 dataset: https://huggingface.co/datasets/lefft/tau-dev-task-retail-v1
 - AReaL tau2 data: https://huggingface.co/datasets/inclusionAI/AReaL-tau2-data
 
-ソースコード確認メモ:
+APIバージョン互換性:
 
-- 2026-05-29時点で `OpenPipe/ART` の `main` を `/tmp/openpipe-art-source` に shallow cloneして確認。
-- `pyproject.toml` では `openpipe-art` version が `0.5.18`。GitHub release表示では `v0.5.17` が最新として見えるため、教材では必ずバージョンをpinする。
-- 現行docs/sourceではRL学習は `backend.train(model, trajectory_groups, ...)` と `await model.log(..., metrics=result.metrics, step=result.step, split="train")` を明示的に組み合わせる形が中心。
-- 古い例やnotebookには `model.train(...)` 形式が残っているため、教材内に「API drift note」を入れる。
+- OpenPipe ARTは開発が速いため、ハンズオンでは `openpipe-art` のバージョンをpinし、READMEと `.env.example` に明示する。
+- RL学習の基本形は `backend.train(model, trajectory_groups, ...)` と `await model.log(..., metrics=result.metrics, step=result.step, split="train")` を組み合わせる形に統一する。
+- 古いnotebookやblog exampleと差がある箇所は、`Version compatibility` として明示する。
 
 ## 3. コース全体像
 
-推奨形式:
+コース形式:
 
-API smoke test:
+API互換性チェック:
 
 - 受講者の設定は `.env.example` -> `.env` を基本にし、shell envが `.env` より優先される設計にする。
-- 教材で写経させる公開API名・引数名は、pinした `openpipe-art` バージョンで `course/00_setup/art_api_smoke.py` のimport/signature smoke testを通してから使う。
+- ハンズオンで使う公開API名・引数名は、pinした `openpipe-art` バージョンで `course/00_setup/art_api_smoke.py` のimport/signature smoke testを通してから使う。
 - 特に `backend.train` kwargs、RULER kwargs、SFT helper、checkpoint/state/config系APIはdocsだけでなくsource/installed packageの両方で確認する。
 
-- 2日集中ワークショップ + 事前セットアップ + 事後capstone
-- 各章は「10-20分の座学 -> 20-45分のハンズオン -> W&B/Weaveで観察 -> 設計判断ディスカッション」の型で進める。
+- フルワークショップ + 事前セットアップ + 事後capstone
+- 各章は「座学 -> ハンズオン -> W&B/Weaveで観察 -> 設計判断ディスカッション」の型で進める。
 - 受講者はGPUに応じて2つの演習トラックを選ぶ。
 
 ### 3.1 短時間デリバリー版
 
-短時間デリバリーの現実的な北極星は「その場で長期RLを完走する」ではなく、「W&B Models / Weave / ARTでagentic SFT/RLをどう設計・観測・検証するかを理解し、短い実行で初期信号を見て、フル検証済み結果で有効性を確認する」こと。尺は顧客・GPU・事前準備状況に合わせて調整する。
+短時間デリバリーのゴールは、W&B Models / Weave / ARTでagentic SFT/RLをどう設計・観測・検証するかを理解し、短い実行で初期信号を確認し、フル検証済み結果で有効性を確認すること。構成はセッション時間、GPU、事前準備状況に合わせて調整する。
 
 推奨セグメント:
 
@@ -93,16 +92,16 @@ API smoke test:
 実行トラック:
 
 - No GPU / ネットワーク制限あり: `.env`、data artifact、cached eval、Weave trace、runbook dry-runを中心にする。
-- 小さめGPU: `ART_MODEL_PROFILE=tiny` または小型HF互換モデルで、setup、SFT、GRPO smokeの流れを確認する。性能改善は期待結果として扱わない。
-- H100 1枚: `LiquidAI/LFM2.5-8B-A1B` で短いSFTと数stepのGRPOを実行し、初期上昇やreward varianceを観測する。長期runは宿題または講師事前runにする。
+- 小さめGPU: `ART_MODEL_PROFILE=tiny` または小型HF互換モデルで、setup、SFT、GRPO smokeの流れを確認する。
+- H100 1枚: `LiquidAI/LFM2.5-8B-A1B` で短いSFTと数stepのGRPOを実行し、初期上昇やreward varianceを観測する。
 - H100複数枚: SFT parentからGRPO/GSPO/RULERを独立分岐で並列実行し、checkpoint candidate selectionとheld-out evalまで行う。
 
-この短時間版では、嘘をつかないために次を明確に言う:
+Key takeaways:
 
-- 小モデルや短時間runは操作手順と初期信号を見るためのもの。
-- 「Agentic RLが有効」と言える根拠は、講師側で事前にH100フル検証したheld-out validation、W&B Artifact lineage、Weave traceで示す。
-- 長期RLは単調改善しない。`select_checkpoint_candidate.py` で中間checkpointを選び、fresh validation evalで採用する。
-- 最終期待結果表にはtrain rewardのbest rowを載せない。必ずheld-out evalとacceptance gateを通った結果だけを載せる。
+- 短時間runでは、操作手順、W&B/Weave連携、初期学習信号の読み方を体験する。
+- 性能改善は、held-out validation、W&B Artifact lineage、Weave traceが揃ったフル検証結果で確認する。
+- 長期RLは単調改善を仮定しない。`select_checkpoint_candidate.py` で中間checkpointを選び、fresh validation evalで採用する。
+- 期待結果表にはtrain rewardのbest rowではなく、held-out evalとacceptance gateを通った結果を載せる。
 
 トラック:
 
@@ -113,21 +112,25 @@ API smoke test:
 モデル選択:
 
 - `ART_MODEL_PROFILE=tiny`: `Qwen/Qwen3-0.6B`。小さなGPUやCPU寄り環境でのsetup/SFT/RL smoke test用。性能改善の説得力ではなく、教材の操作手順を低コストに確認するためのプロファイル。
-- `ART_MODEL_PROFILE=standard`: `LiquidAI/LFM2.5-8B-A1B`。H100を想定したメインハンズオンの基準モデル。2026-06-06時点ではこのモデルを主候補として、next-action SFTとtau-style RLのフル検証を進めている。
+- `ART_MODEL_PROFILE=standard`: `LiquidAI/LFM2.5-8B-A1B`。H100を想定したメインハンズオンの基準モデル。next-action SFTとtau-style RLを扱う標準プロファイル。
 - `ART_MODEL_PROFILE=openpipe`: `OpenPipe/Qwen3-14B-Instruct`。OpenPipe/Qwen系の互換性比較やmanaged trainingの話題に使う。
 - `ART_MODEL_PROFILE=serverless`: `OpenPipe/Qwen3-14B-Instruct`。W&B Serverless RLの軽い比較デモ用。
 - `ART_MODEL_PROFILE=moe`: `Qwen/Qwen3-30B-A3B-Instruct-2507`。Serverless/Megatron/MoEの発展説明用。
-- `ART_BASE_MODEL` を指定した場合はprofileより優先され、参加者や講師が任意のHF/vLLM互換モデルへ差し替えられる。
+- `ART_BASE_MODEL` を指定した場合はprofileより優先され、環境に応じて任意のHF/vLLM互換モデルへ差し替えられる。
 
-検証中の教材ストーリー:
+SFT/RL設計の実務的学び:
 
 - Baseline LFM2.5-8B-A1Bはretail tool callingをある程度こなせるため、初期モデルが完全に壊れているtoy exampleにならない。
-- 古いstrict replayに近い報酬では、小さなscalar reward改善が見えてもagentic RLの教材としては不十分だった。最終版ではこの結果を「診断用の失敗例」として扱い、期待結果には使わない。
-- 現在の本線は、短いbridge curriculumで `next-action SFT -> GRPO branch / GSPO branch` を独立比較し、`tau_irc` 報酬、state-changing action correctness、communication success、proxy outcome success、official tau2 importを横持ち表で検証する流れ。SFT parentが弱い場合は、`amityco/tau-bench-retail-train-next-action-all-step-score-v0.2` の高スコアteacher next-action行を `make_teacher_next_action_sft_jsonl.py` で変換し、bridge next-actionと混ぜたwarm startを使う。
+- SFTは有効だが、full trajectoryをそのまま全assistant turnで模倣させるだけでは、重要な意思決定が「それっぽい会話の再現」に埋もれやすい。
+- Agentic SFTでは、状態を変えるtool callや最終応答などの意思決定点を `next-action` 形式で切り出し、直前contextから「次に何をすべきか」を学ばせる。
+- SFTはagentic RLの代替ではなく、tool-call dialect、policy adherence、初期成功率、rolloutの安定性を整えるwarm startとして位置づける。
+- RLの報酬設計は、final successだけの疎な報酬では信号が弱く、dense rewardを足しすぎると本来の成功方向とずれることがある。verifiable outcome、state-changing action correctness、communication quality、安全ペナルティを分けて設計する。
+- 報酬設計は一度で決めない。既存研究のレシピを初期仮説にし、reward profile、penalty weight、learning rate、checkpoint selection metricを複数水準で比較する。
+- 短いbridge curriculumで `next-action SFT -> GRPO branch / GSPO branch` を独立比較し、`tau_irc` 系報酬、state-changing action correctness、communication success、proxy outcome success、official tau2 importを横持ち表で検証する。
 - SFT checkpointはlossだけでは採用しない。baseline/SFT/RLを同じholdoutでWeave evalし、SFTが少なくともtool-call形式とstate-changing action指標を改善していることを確認してからRL parentにする。
 - RLは「エラーなく回る」では合格にしない。group内reward variance、winner-minus-loser差分、zero-variance group filter、state-action attempt/reached rate、bad/missing state-action rateをW&Bに出し、GRPO/GSPOが実際に学習信号を受けていることを確認する。
-- 長いRL runは単調改善を仮定しない。`train_metrics_<algo>_<suffix>.jsonl` と `select_checkpoint_candidate.py` で候補stepを選び、file-only forkした中間checkpointをheld-out evalとWeave traceで確認してから期待結果に採用する。
-- 最終的な期待結果表は、フル再実行後にW&B Artifacts/Weave tracesと紐づく横持ちテーブルへ差し替える。汚れた探索projectのログは研究記録として残し、共有用sample projectは別projectに再実行して作る。
+- 長いRL runは単調改善を仮定しない。`train_metrics_<algo>_<suffix>.jsonl` と `select_checkpoint_candidate.py` で候補stepを選び、中間checkpointをheld-out eval、W&B Artifact lineage、Weave traceで確認してから採用する。
+- 期待結果表は、train rewardの最大値ではなく、held-out evalとacceptance gateを通ったcheckpointだけを使う。
 
 SFT設計で巨人の肩に乗るポイント:
 

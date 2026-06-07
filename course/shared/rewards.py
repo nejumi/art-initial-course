@@ -19,7 +19,23 @@ from .retail_env import (
 from .schemas import RetailScenario, RewardResult
 
 _WORD_RE = re.compile(r"[a-z0-9_]+")
-REWARD_PROFILES = ("dense", "strict_success", "agentic", "tau_sparse", "tau_irc")
+REWARD_PROFILES = (
+    "dense",
+    "strict_success",
+    "agentic",
+    "tau_sparse",
+    "tau_irc",
+    "tau_irc_outcome",
+    "tau_irc_balanced",
+    "tau_irc_guarded",
+)
+TAU_STYLE_REWARD_PROFILES = {
+    "tau_sparse",
+    "tau_irc",
+    "tau_irc_outcome",
+    "tau_irc_balanced",
+    "tau_irc_guarded",
+}
 
 
 def normalize_reward_profile(profile: str | None = None) -> str:
@@ -288,31 +304,91 @@ def score_messages(
     elif profile == "tau_sparse":
         reward_components = {"reward_component/outcome": outcome_success}
         reward = sum(reward_components.values())
-    elif profile == "tau_irc":
+    elif profile in {"tau_irc", "tau_irc_outcome", "tau_irc_balanced", "tau_irc_guarded"}:
         # Tau-style calibrated shaping: reward the final verifiable outcome,
         # give soft credit only to state-changing actions, and keep read-only
         # lookups as diagnostics instead of positive reward drivers.
-        invalid_state_penalty = min(0.8, invalid_state_mutations * 0.4)
-        bad_state_penalty = min(0.4, bad_state_actions * 0.2)
-        unnecessary_read_penalty = min(0.15, read_only_reference_mismatches * 0.03)
-        unknown_tool_penalty = min(0.5, unknown_tool_calls * 0.25)
-        missing_state_penalty = min(0.4, missing_state_actions * 0.2)
+        if profile == "tau_irc":
+            outcome_weight = 0.65
+            state_action_weight = 0.20
+            state_action_args_weight = 0.10
+            state_action_sequence_weight = 0.00
+            state_action_reached_weight = 0.00
+            communication_weight = 0.05
+            invalid_state_penalty = min(0.8, invalid_state_mutations * 0.4)
+            bad_state_penalty = min(0.4, bad_state_actions * 0.2)
+            unnecessary_read_penalty = min(0.15, read_only_reference_mismatches * 0.03)
+            unknown_tool_penalty = min(0.5, unknown_tool_calls * 0.25)
+            missing_state_penalty = min(0.4, missing_state_actions * 0.2)
+            truncation_penalty = 0.0
+        elif profile == "tau_irc_outcome":
+            outcome_weight = 0.75
+            state_action_weight = 0.10
+            state_action_args_weight = 0.05
+            state_action_sequence_weight = 0.00
+            state_action_reached_weight = 0.00
+            communication_weight = 0.10
+            invalid_state_penalty = min(0.8, invalid_state_mutations * 0.4)
+            bad_state_penalty = min(0.4, bad_state_actions * 0.2)
+            unnecessary_read_penalty = min(0.15, read_only_reference_mismatches * 0.03)
+            unknown_tool_penalty = min(0.5, unknown_tool_calls * 0.25)
+            missing_state_penalty = min(0.35, missing_state_actions * 0.175)
+            truncation_penalty = 0.10 if truncated_by_max_turn else 0.0
+        elif profile == "tau_irc_balanced":
+            outcome_weight = 0.55
+            state_action_weight = 0.20
+            state_action_args_weight = 0.10
+            state_action_sequence_weight = 0.10
+            state_action_reached_weight = 0.00
+            communication_weight = 0.05
+            invalid_state_penalty = min(0.9, invalid_state_mutations * 0.45)
+            bad_state_penalty = min(0.6, bad_state_actions * 0.3)
+            unnecessary_read_penalty = min(0.15, read_only_reference_mismatches * 0.03)
+            unknown_tool_penalty = min(0.6, unknown_tool_calls * 0.3)
+            missing_state_penalty = min(0.5, missing_state_actions * 0.25)
+            truncation_penalty = 0.15 if truncated_by_max_turn else 0.0
+        else:
+            outcome_weight = 0.45
+            state_action_weight = 0.20
+            state_action_args_weight = 0.10
+            state_action_sequence_weight = 0.10
+            state_action_reached_weight = 0.05
+            communication_weight = 0.10
+            invalid_state_penalty = min(1.0, invalid_state_mutations * 0.5)
+            bad_state_penalty = min(1.0, bad_state_actions * 0.5)
+            unnecessary_read_penalty = min(0.2, read_only_reference_mismatches * 0.04)
+            unknown_tool_penalty = min(0.6, unknown_tool_calls * 0.3)
+            missing_state_penalty = min(0.6, missing_state_actions * 0.3)
+            truncation_penalty = 0.20 if truncated_by_max_turn else 0.0
         reward_components = {
-            "reward_component/outcome": 0.65 * outcome_success,
-            "reward_component/state_action": 0.20 * state_action_score,
-            "reward_component/state_action_args": 0.10 * state_action_args,
-            "reward_component/communication": 0.05 * communication_success,
+            "reward_component/outcome": outcome_weight * outcome_success,
+            "reward_component/state_action": state_action_weight * state_action_score,
+            "reward_component/state_action_args": state_action_args_weight * state_action_args,
+            "reward_component/state_action_sequence": state_action_sequence_weight * state_action_sequence,
+            "reward_component/state_action_reached": state_action_reached_weight * state_action_reached,
+            "reward_component/communication": communication_weight * communication_success,
             "reward_component/penalty_invalid_state": -invalid_state_penalty,
             "reward_component/penalty_bad_state": -bad_state_penalty,
             "reward_component/penalty_read_only": -unnecessary_read_penalty,
             "reward_component/penalty_unknown_tool": -unknown_tool_penalty,
             "reward_component/penalty_missing_state": -missing_state_penalty,
+            "reward_component/penalty_truncation": -truncation_penalty,
             "reward_component/penalty_turns": -turn_penalty,
         }
         reward = sum(reward_components.values())
     reward = max(-1.0, min(1.0, reward))
 
     metrics = {
+        "course_eval_score": (
+            outcome_success
+            + 0.5 * task_success
+            + 0.5 * state_action_sequence
+            + 0.25 * valid_state_action_rate
+            + 0.10 * communication_success
+            - 0.70 * float(bad_state_actions)
+            - 0.35 * float(missing_state_actions)
+            - 0.30 * (1.0 if truncated_by_max_turn else 0.0)
+        ),
         "task_success": task_success,
         "outcome_success": outcome_success,
         "proxy_outcome_success": outcome_success,

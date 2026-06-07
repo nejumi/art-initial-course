@@ -273,9 +273,11 @@ def reward_signal_metrics(groups: list[Any], *, prefix: str = "data/step") -> di
         ),
         f"{prefix}_outcome_success_mean": mean(metric_values(groups, "outcome_success")),
         f"{prefix}_task_success_mean": mean(metric_values(groups, "task_success")),
+        f"{prefix}_state_action_sequence_match_mean": mean(metric_values(groups, "state_action_sequence_match")),
         f"{prefix}_state_action_reached_rate_mean": mean(metric_values(groups, "state_action_reached_rate")),
         f"{prefix}_state_action_attempt_rate_mean": mean(metric_values(groups, "state_action_attempt_rate")),
         f"{prefix}_valid_state_action_rate_mean": mean(metric_values(groups, "valid_state_action_rate")),
+        f"{prefix}_communication_success_mean": mean(metric_values(groups, "communication_success")),
         f"{prefix}_invalid_tool_call_mean": mean(metric_values(groups, "invalid_tool_call")),
         f"{prefix}_invalid_state_mutation_mean": mean(metric_values(groups, "invalid_state_mutation")),
         f"{prefix}_unknown_tool_call_mean": mean(metric_values(groups, "unknown_tool_call")),
@@ -284,6 +286,18 @@ def reward_signal_metrics(groups: list[Any], *, prefix: str = "data/step") -> di
         f"{prefix}_truncated_by_max_turn_mean": mean(metric_values(groups, "truncated_by_max_turn")),
         f"{prefix}_terminated_on_invalid_mean": mean(metric_values(groups, "terminated_on_invalid")),
     }
+    course_score_parts = [
+        metrics[f"{prefix}_outcome_success_mean"],
+        0.5 * metrics[f"{prefix}_task_success_mean"],
+        0.5 * metrics[f"{prefix}_state_action_sequence_match_mean"],
+        0.25 * metrics[f"{prefix}_valid_state_action_rate_mean"],
+        0.10 * metrics[f"{prefix}_communication_success_mean"],
+        -0.70 * metrics[f"{prefix}_bad_state_action_mean"],
+        -0.35 * metrics[f"{prefix}_missing_state_action_mean"],
+        -0.30 * metrics[f"{prefix}_truncated_by_max_turn_mean"],
+    ]
+    if all(not math.isnan(value) for value in course_score_parts):
+        metrics[f"{prefix}_course_score_mean"] = sum(course_score_parts)
     metrics.update(group_diagnostic_metrics(groups, prefix=prefix))
     return {key: value for key, value in metrics.items() if not math.isnan(value)}
 

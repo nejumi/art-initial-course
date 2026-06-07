@@ -32,6 +32,8 @@ SPLIT="${8:-validation}"
 TEMPERATURE="${9:-0.0}"
 ROLLOUTS_PER_SCENARIO="${10:-1}"
 MAX_COMPLETION_TOKENS="${11:-768}"
+MODEL_ARTIFACT_URI="${12:-}"
+MODEL_ARTIFACT_STAGE="${13:-validation-candidate}"
 
 mkdir -p .art/sunk_runs/logs
 mkdir -p "$(dirname "$OUTPUT")"
@@ -60,11 +62,27 @@ echo "model_name=$ART_MODEL_NAME"
 echo "data_dir=$DATA_DIR"
 echo "output=$OUTPUT"
 echo "data_artifact=$DATA_ARTIFACT"
+echo "model_artifact_uri=${MODEL_ARTIFACT_URI:-<auto-log>}"
+echo "model_artifact_stage=$MODEL_ARTIFACT_STAGE"
 echo "reward_profile=$REWARD_PROFILE"
 echo "split=$SPLIT limit=$LIMIT temperature=$TEMPERATURE rollouts_per_scenario=$ROLLOUTS_PER_SCENARIO"
 hostname
 date -Is
 nvidia-smi
+
+if [[ -z "$MODEL_ARTIFACT_URI" ]]; then
+  MODEL_ARTIFACT_URI="$(
+    python -B course/07_models_registry_weave/log_checkpoint_artifact.py \
+      --stage "$MODEL_ARTIFACT_STAGE" \
+      --model-name "$MODEL_NAME" \
+      --alias validation-candidate \
+      --metadata eval_split="\"$SPLIT\"" \
+      --metadata eval_limit="$LIMIT" \
+      --metadata reward_profile="\"$REWARD_PROFILE\"" \
+      | tail -n 1
+  )"
+fi
+echo "resolved_model_artifact_uri=$MODEL_ARTIFACT_URI"
 
 CMD=(
   python -B course/04_grpo_local/evaluate_checkpoint.py
@@ -82,6 +100,9 @@ CMD=(
 )
 if [[ -n "$DATA_ARTIFACT" ]]; then
   CMD+=(--data-artifact "$DATA_ARTIFACT")
+fi
+if [[ -n "$MODEL_ARTIFACT_URI" ]]; then
+  CMD+=(--model-artifact "$MODEL_ARTIFACT_URI")
 fi
 
 "${CMD[@]}"

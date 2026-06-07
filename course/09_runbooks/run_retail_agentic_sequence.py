@@ -713,7 +713,7 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="Write checkpoint candidate Markdown/JSON from per-step RL metrics before held-out eval.",
     )
-    parser.add_argument("--rl-candidate-metric", default="data/step_reward_mean")
+    parser.add_argument("--rl-candidate-metric", default="data/step_course_score_mean")
     parser.add_argument("--rl-candidate-top-k", type=int, default=3)
     parser.add_argument("--ruler-judge-model", default="openai/gpt-5.5")
     parser.add_argument("--ruler-judge-effort", default="medium", choices=["low", "medium", "high", "xhigh"])

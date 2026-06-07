@@ -17,6 +17,7 @@ from course.shared.wandb_artifacts import artifact_with_alias
 
 METRIC_KEYS = [
     "reward",
+    "course_eval_score",
     "outcome_pass_at_k",
     "task_pass_at_k",
     "reward_std_by_scenario",
@@ -70,6 +71,8 @@ METRIC_KEYS = [
     "reward_component/outcome",
     "reward_component/state_action",
     "reward_component/state_action_args",
+    "reward_component/state_action_sequence",
+    "reward_component/state_action_reached",
     "reward_component/communication",
     "reward_component/tool_name",
     "reward_component/tool_order",
@@ -82,11 +85,13 @@ METRIC_KEYS = [
     "reward_component/penalty_read_only",
     "reward_component/penalty_unknown_tool",
     "reward_component/penalty_missing_state",
+    "reward_component/penalty_truncation",
     "reward_component/penalty_turns",
 ]
 
 DELTA_KEYS = [
     "reward",
+    "course_eval_score",
     "outcome_pass_at_k",
     "task_pass_at_k",
     "tau2_official_reward",
@@ -106,6 +111,7 @@ DELTA_KEYS = [
 
 COMPACT_METRIC_KEYS = [
     "reward",
+    "course_eval_score",
     "outcome_success",
     "proxy_outcome_success",
     "task_success",
@@ -122,6 +128,7 @@ COMPACT_METRIC_KEYS = [
 
 COMPACT_DELTA_KEYS = [
     "reward",
+    "course_eval_score",
     "outcome_success",
     "task_success",
     "state_action_sequence_match",

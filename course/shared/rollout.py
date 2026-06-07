@@ -5,7 +5,7 @@ from typing import Any
 from .config import config_from_env
 from .data import augment_system_message
 from .retail_env import ReplayRetailEnv, is_state_changing_tool
-from .rewards import normalize_reward_profile, score_trajectory
+from .rewards import TAU_STYLE_REWARD_PROFILES, normalize_reward_profile, score_trajectory
 from .schemas import RetailScenario
 from .tracing import weave_op
 
@@ -27,7 +27,7 @@ async def rollout_retail(
     cfg = config_from_env()
     should_terminate_on_invalid = cfg.terminate_on_invalid if terminate_on_invalid is None else terminate_on_invalid
     reward_profile = normalize_reward_profile()
-    strict_reference_actions = reward_profile not in {"tau_sparse", "tau_irc"}
+    strict_reference_actions = reward_profile not in TAU_STYLE_REWARD_PROFILES
 
     trajectory = art.Trajectory(
         messages_and_choices=[

@@ -302,7 +302,7 @@ Official tau2 evaluation bridge: [course/02_weave_evals/official_tau2_eval_bridg
 
 ## Validated Course Result
 
-The validated H100 path uses `LiquidAI/LFM2.5-8B-A1B`, bridge next-action rows, public teacher next-action rows, last-assistant SFT masking, and short GRPO from the SFT anchor. The selected RL checkpoint is chosen by fresh held-out validation, not by assuming the latest training step is best.
+The validated H100 path uses `LiquidAI/LFM2.5-8B-A1B`, bridge next-action rows, public teacher next-action rows, last-assistant SFT masking, and 18-step GRPO from the SFT anchor. The selected RL checkpoint is chosen by fresh held-out validation, not by assuming the latest training step is best.
 
 Held-out checkpoint validation from the current course recipe:
 

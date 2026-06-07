@@ -114,7 +114,7 @@ profiles:
       vllm_max_num_seqs: 8
 
   validated_h100:
-    description: "Validated LFM2.5 8B course profile: teacher-mix SFT followed by short GRPO."
+    description: "Validated LFM2.5 8B course profile: teacher-mix SFT followed by 18-step GRPO."
     args:
       run_slug: lfm25-8b-a1b-retail-validated
       data_dir: .art/curriculum_data/retail_bridge_state1_validated
@@ -129,10 +129,10 @@ profiles:
       sft_chunk_size_batches: 12
       sft_peak_lr: 0.00001
       rl_algos: grpo
-      rl_suffix: validated-balanced-s2-g8-r8
+      rl_suffix: validated-balanced-s18-g8-r8
       reward_profile: tau_irc_balanced
       rl_train_limit: 48
-      rl_steps: 2
+      rl_steps: 18
       rl_groups_per_step: 8
       rl_rollouts_per_scenario: 8
       rl_learning_rate: 0.000001
@@ -144,7 +144,7 @@ profiles:
       vllm_max_num_seqs: 8
 
   validated_long_h100:
-    description: Longer GRPO validation profile for checkpoint-selection demonstrations.
+    description: Alias-style longer GRPO validation profile with isolated artifact names.
     args:
       run_slug: lfm25-8b-a1b-retail-validated-long
       data_dir: .art/curriculum_data/retail_bridge_state1_validated_long

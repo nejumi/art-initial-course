@@ -46,6 +46,8 @@ export ART_VLLM_RUNTIME_CACHE_DIR="${ART_VLLM_RUNTIME_CACHE_DIR:-$PWD/.art/vllm_
 export HF_HOME="${HF_HOME:-$PWD/.art/hf_home}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"
 export HF_XET_HIGH_PERFORMANCE=1
+export WEAVE_SERVER_CACHE_DIR="${WEAVE_SERVER_CACHE_DIR:-$PWD/.art/weave_cache/${SLURM_JOB_ID:-manual}}"
+mkdir -p "$WEAVE_SERVER_CACHE_DIR"
 
 if [[ -n "${ART_VLLM_GPU_MEMORY_UTILIZATION:-}" ]]; then
   :

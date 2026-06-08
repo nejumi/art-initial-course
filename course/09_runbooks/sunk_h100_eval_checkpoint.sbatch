@@ -71,16 +71,23 @@ date -Is
 nvidia-smi
 
 if [[ -z "$MODEL_ARTIFACT_URI" ]]; then
+  artifact_log="$(mktemp)"
+  python -B course/07_models_registry_weave/log_checkpoint_artifact.py \
+    --stage "$MODEL_ARTIFACT_STAGE" \
+    --model-name "$MODEL_NAME" \
+    --alias validation-candidate \
+    --metadata eval_split="\"$SPLIT\"" \
+    --metadata eval_limit="$LIMIT" \
+    --metadata reward_profile="\"$REWARD_PROFILE\"" \
+    2>&1 | tee "$artifact_log"
   MODEL_ARTIFACT_URI="$(
-    python -B course/07_models_registry_weave/log_checkpoint_artifact.py \
-      --stage "$MODEL_ARTIFACT_STAGE" \
-      --model-name "$MODEL_NAME" \
-      --alias validation-candidate \
-      --metadata eval_split="\"$SPLIT\"" \
-      --metadata eval_limit="$LIMIT" \
-      --metadata reward_profile="\"$REWARD_PROFILE\"" \
-      | tail -n 1
+    awk -F'Logged W&B checkpoint artifact: ' '/Logged W&B checkpoint artifact:/ {uri=$2} END {gsub(/\r/, "", uri); print uri}' "$artifact_log"
   )"
+  rm -f "$artifact_log"
+  if [[ -z "$MODEL_ARTIFACT_URI" ]]; then
+    echo "Could not parse logged checkpoint artifact URI." >&2
+    exit 1
+  fi
 fi
 echo "resolved_model_artifact_uri=$MODEL_ARTIFACT_URI"
 

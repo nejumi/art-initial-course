@@ -11,7 +11,7 @@ Tool = dict[str, Any]
 @dataclass
 class RetailScenario:
     id: str
-    split: Literal["train", "validation", "test", "val"]
+    split: Literal["sft", "train", "validation", "test", "val"]
     system_message: str
     user_message: str
     tools: list[Tool]

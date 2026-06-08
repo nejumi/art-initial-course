@@ -1,7 +1,7 @@
 # OpenPipe ART x W&B Models x Weave Training Course Blueprint
 
 作成日: 2026-05-29  
-最終更新: 2026-06-07
+最終更新: 2026-06-08
 想定: エンタープライズ利用者向け。ローカルGPU / Dedicated Cloud / Customer Managed (W&B公式名称では Self-Managed) を主軸にし、Multi-tenant SaaS と Serverless RL は比較・補足として扱う。
 
 ## 1. コースの北極星
@@ -75,7 +75,7 @@ API互換性チェック:
 
 ### 3.1 短時間デリバリー版
 
-コースのゴールは、W&B Models / Weave / ARTでagentic SFT/RLをどう設計・観測・検証するかを理解し、短い実行で初期信号を確認し、検証済み結果で有効性を確認すること。構成はセッション時間、GPU、事前準備状況に合わせて調整する。
+コースのゴールは、W&B Models / Weave / ARTでagentic SFT/RLをどう設計・観測・検証するかを理解し、短い実行で初期信号を確認し、評価ワークフローとして妥当な採用判断を行えるようにすること。構成はセッション時間、GPU、事前準備状況に合わせて調整する。
 
 ワークショップ設定の基本:
 
@@ -102,7 +102,7 @@ overrides: {}
 | やりたいこと | 変更する行 | 意味 |
 | --- | --- | --- |
 | 標準ワークショップを実行 | `run_profile: workshop_fast_h100` | SFT -> GRPOの流れを短めに実行する |
-| 検証済み条件に近いフル実行 | `run_profile: validated_h100` | SFT/RL/evalを増やし、期待結果表に近い検証を行う |
+| フル検証に近い実行 | `run_profile: validated_h100` | SFT/RL/evalを増やし、checkpoint候補選択とheld-out評価まで行う |
 | 小さいGPUで流れだけ確認 | `model_profile: tiny` | 小型モデルでsetup/SFT/RL smokeを確認する |
 | H100想定の標準モデル | `model_profile: standard` | `LiquidAI/LFM2.5-8B-A1B` を使う |
 | 任意のHF/vLLM互換モデル | `model_profile: custom` と `base_model: ...` | 指定したモデルを直接使う |
@@ -125,7 +125,7 @@ overrides: {}
 | Task and evals | Retail taskと評価指標 | cached eval JSONL / Weave Evaluationを見る | Retail Task Successとtrace診断の読み方 |
 | SFT warm start | SFT warm start | 小モデルまたはdry-runでSFT commandを実行 | SFT loss curve、checkpoint artifact lineage |
 | Agentic RL | GRPO/GSPO/RULERの考え方 | 可能なら短いGRPO smoke | group reward range、winner-minus-loser、dropped no-signal groups |
-| Verified results | 検証済み結果 | 事前runのW&B table / Weave tracesを読む | Baseline、SFT、RLの横持ち比較表 |
+| Validation workflow | checkpoint評価 | W&B table / Weave tracesを読む | SFTとRL checkpointを同じheld-out条件で比較する流れ |
 | Enterprise wrap-up | Enterprise運用設計 | Dedicated Cloud / Self-Managed / LocalBackend比較 | Registry昇格、Artifact lineage、再現性チェックリスト |
 
 実行トラック:
@@ -138,22 +138,20 @@ overrides: {}
 Key takeaways:
 
 - 短時間runでは、操作手順、W&B/Weave連携、初期学習信号の読み方を体験する。
-- 性能改善は、checkpoint validation、W&B Artifact lineage、Weave traceが揃った検証結果で確認する。
+- 性能改善は、checkpoint validation、W&B Artifact lineage、Weave traceが揃った評価で確認する。
 - 長期RLは単調改善を仮定しない。`select_checkpoint_candidate.py` で中間checkpointを選び、fresh validation evalで採用する。
-- 期待結果表にはtrain rewardのbest rowではなく、checkpoint validationを通った結果を載せる。
+- train rewardのbest rowは採用根拠にしない。checkpoint validationを通った結果だけを比較対象にする。
 
-検証済み期待結果:
+評価ワークフローの読み方:
 
-| Stage | `retail_task_success` | `state_action_sequence_match` | `valid_state_action_rate` | `bad_state_action` | `missing_state_action` |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Baseline | 0.160 | 0.160 | 0.160 | 0.480 | 0.840 |
-| SFT anchor | 0.240 | 0.280 | 0.300 | 0.400 | 0.680 |
-| Short GRPO selected checkpoint | 0.280 | 0.360 | 0.360 | 0.160 | 0.640 |
+- Baselineで、base modelの初期難易度、state action error、truncationを把握する。
+- SFT anchorで、tool-call形式、状態変更行動、最終応答がRLの出発点として安定しているかを見る。
+- GRPO selected checkpointで、SFT anchorと同じheld-out条件に対する改善、失敗理由、artifact lineage、Weave traceを確認する。
 
 読み方:
 
 - SFTでtool-call形式、状態変更行動、初期成功率を底上げする。
-- 短いGRPOで `bad_state_action` を大きく下げ、`state_action_sequence_match` と `retail_task_success` を改善する。
+- GRPOで `bad_state_action` / `missing_state_action` を下げ、`state_action_sequence_match` と `retail_task_success` を改善する。
 - 長いRLは必ずしも単調改善しない。W&Bの学習曲線で候補を選び、held-out validationとWeave traceで採用checkpointを確認する。
 
 トラック:
@@ -254,7 +252,7 @@ Reference anchors:
 - SFT checkpointはlossだけでは採用しない。baseline/SFT/RLを同じholdoutでWeave evalし、SFTが少なくともtool-call形式とstate-changing action指標を改善していることを確認してからRL parentにする。
 - RLは「エラーなく回る」では合格にしない。group内reward variance、winner-minus-loser差分、zero-variance group filter、state-action attempt/reached rate、bad/missing state-action rateをW&Bに出し、GRPO/GSPOが実際に学習信号を受けていることを確認する。
 - 長いRL runは単調改善を仮定しない。`train_metrics_<algo>_<suffix>.jsonl` と `select_checkpoint_candidate.py` で候補stepを選び、中間checkpointをheld-out eval、W&B Artifact lineage、Weave traceで確認してから採用する。
-- 期待結果表は、train rewardの最大値ではなく、held-out evalとacceptance gateを通ったcheckpointだけを使う。
+- 採用判断はtrain rewardの最大値ではなく、held-out evalとacceptance gateを通ったcheckpointだけで行う。
 
 SFT設計で巨人の肩に乗るポイント:
 
@@ -617,7 +615,7 @@ from art.utils.sft import train_sft_from_file
 await train_sft_from_file(
     model=model,
     backend=backend,
-    file_path="data/retail/sft_train.jsonl",
+    file_path="data/retail_bridge_state1/sft_next_action.jsonl",
     config=art.TrainSFTConfig(learning_rate=5e-5, batch_size="auto"),
 )
 ```

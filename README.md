@@ -18,8 +18,8 @@ The course uses public datasets so the labs can run end to end without private t
 
 | Dataset | Main use | Why it is useful | Course handling |
 | --- | --- | --- | --- |
-| [`lefft/tau-dev-task-retail-v1`](https://huggingface.co/datasets/lefft/tau-dev-task-retail-v1) | Default SFT and evaluation data | Successful retail trajectories already serialized in OpenAI tool-call format | Downloaded by `download_tau_retail.py`; converted to `sft_*.jsonl` |
-| [`amityco/tau-bench-retail-train-next-action-all-step-score-v0.2`](https://huggingface.co/datasets/amityco/tau-bench-retail-train-next-action-all-step-score-v0.2) | Optional teacher next-action SFT | Step-level retail tool-call rows with candidate scores | Converted by `make_teacher_next_action_sft_jsonl.py`; can be mixed with bridge next-action rows |
+| [`lefft/tau-dev-task-retail-v1`](https://huggingface.co/datasets/lefft/tau-dev-task-retail-v1) | Default SFT, rollout, and evaluation source | Successful retail trajectories already serialized in OpenAI tool-call format | Downloaded by `download_tau_retail.py`; split into disjoint `sft` / `train` / `validation` / `test` buckets |
+| [`amityco/tau-bench-retail-train-next-action-all-step-score-v0.2`](https://huggingface.co/datasets/amityco/tau-bench-retail-train-next-action-all-step-score-v0.2) | Optional teacher next-action SFT | Step-level retail tool-call rows with candidate scores | Converted by `make_teacher_next_action_sft_jsonl.py`; filtered to the SFT task fold before mixing |
 | [`inclusionAI/AReaL-tau2-data`](https://huggingface.co/datasets/inclusionAI/AReaL-tau2-data) | Advanced next-action SFT option | Mirrors recent tau2-style SFT + verifiable-reward RL workflows | Converted by `make_areal_retail_sft_jsonl.py`; strips thinking fields and normalizes tool calls |
 | [`KermitCO/qwen3.5-9B-tau2bench-retail-traces`](https://huggingface.co/datasets/KermitCO/qwen3.5-9B-tau2bench-retail-traces) | Success-trace SFT warm start | Retail-only tau2 traces with canonical reward and judge-quality fields | Converted by `make_success_trace_retail_sft_jsonl.py`; defaults to non-memory, blind-strict, reward-1 traces |
 | [`Jarrodbarnes/Qwen3-4B-tau2-grpo-v1`](https://huggingface.co/Jarrodbarnes/Qwen3-4B-tau2-grpo-v1) | Prior-art reference | Public model card documents SFT -> RFT -> GRPO, turn-level shaping, and tau2 eval settings | Not used as course weights by default; informs the training/eval recipe |
@@ -52,7 +52,8 @@ Evaluation has two classroom-facing levels:
 | Training rollouts | Lightweight local retail environment | `data/step_retail_task_success_mean` | Fast on-policy feedback during GRPO/GSPO/RULER. |
 | Checkpoint validation | Held-out scenarios in the same lightweight environment | `retail_task_success` | Fast comparison of baseline, SFT, and RL checkpoints. |
 
-Data artifacts keep source metadata so training rows and validation rows can be checked separately.
+Data artifacts keep source metadata so SFT rows, RL rollout rows, validation rows, and test rows can be checked separately. The bridge curriculum splits by task hash so these buckets do not share scenario IDs or task IDs.
+When public teacher next-action rows are enabled, the runbook applies the same task-hash split and keeps only the SFT fold. GRPO rollouts and checkpoint validation therefore remain task-disjoint from both local bridge SFT rows and teacher SFT rows.
 
 ## Quick Start
 
@@ -100,8 +101,12 @@ python course/03_sft_warmup/make_bridge_curriculum.py \
   --source-dir data/retail \
   --output-dir data/retail_bridge_state1 \
   --max-state-actions 1 \
-  --max-tool-calls 6 \
-  --max-turns 28
+  --max-tool-calls 8 \
+  --max-turns 32 \
+  --holdout-modulo 6 \
+  --sft-remainder 2 \
+  --validation-remainder 0 \
+  --test-remainder 1
 python course/07_models_registry_weave/log_data_artifacts.py \
   --data-dir data/retail_bridge_state1 \
   --artifact-name retail-course-data-bridge-state1
@@ -187,7 +192,9 @@ Advanced SFT data option:
 python course/03_sft_warmup/make_teacher_next_action_sft_jsonl.py \
   --tools-data-dir data/retail_bridge_state1 \
   --output data/retail_bridge_state1/sft_teacher_retail_next_action.jsonl \
-  --limit 512
+  --limit 512 \
+  --holdout-modulo 6 \
+  --sft-remainder 2
 
 python course/03_sft_warmup/make_areal_retail_sft_jsonl.py \
   --tools-data-dir data/retail_bridge_state1 \
@@ -202,21 +209,21 @@ python course/03_sft_warmup/make_success_trace_retail_sft_jsonl.py \
 
 python course/03_sft_warmup/mix_sft_jsonl.py \
   --inputs \
-    data/retail_bridge_state1/sft_train_next_action.jsonl \
+    data/retail_bridge_state1/sft_next_action.jsonl \
     data/retail_bridge_state1/sft_teacher_retail_next_action.jsonl \
     data/retail_bridge_state1/sft_areal_retail_next_action.jsonl \
     data/retail_bridge_state1/sft_success_trace_retail_next_action.jsonl \
   --limits -1 512 512 512 \
-  --output data/retail_bridge_state1/sft_train_next_action_teacher_areal_success_trace_mix.jsonl
+  --output data/retail_bridge_state1/sft_next_action_teacher_areal_success_trace_mix.jsonl
 ```
 
-The default course path uses compact TAU retail trajectories. The bridge curriculum keeps short successful trajectories with exactly one state-changing action, which is useful for proving that agentic RL can improve a verifiable outcome before moving to the broader retail curriculum. The teacher, AReaL, and success-trace converters are provided for stronger warm starts and advanced experiments that want to align SFT data construction with recent tau2-style multi-turn tool-agent work.
+The default course path uses compact TAU retail trajectories. The bridge curriculum keeps short successful trajectories with exactly one state-changing action and writes disjoint SFT, RL rollout, validation, and test buckets. This keeps GRPO validation independent while preserving a short, understandable task. The teacher, AReaL, and success-trace converters are provided for stronger warm starts and advanced experiments that want to align SFT data construction with recent tau2-style multi-turn tool-agent work.
 
 Next-action SFT should be trained with last-assistant masking:
 
 ```bash
 python course/03_sft_warmup/train_sft_local.py \
-  --file data/retail/sft_train_next_action.jsonl \
+  --file data/retail_bridge_state1/sft_next_action.jsonl \
   --sft-mask-mode last-assistant \
   --batch-size 1 \
   --peak-lr 1e-5 \
@@ -251,7 +258,7 @@ python course/04_grpo_local/train_grpo_local.py \
   --learning-rate 5e-6
 ```
 
-`dense` is a replay-style teaching reward. Use `tau_irc` for the main agentic RL lab because it keeps verifiable outcome/state-changing-action signal as the anchor while treating read-only replay mismatches as diagnostics or small penalties.
+`dense` is a replay-style teaching reward. Use `tau_irc` or `tau_irc_balanced` for the main agentic RL lab because they keep verifiable outcome/state-changing-action signal as the anchor while treating read-only replay mismatches as diagnostics or small penalties.
 
 SFT is intentionally chunked: one ART SFT call produces one ART checkpoint/log point, so `--chunk-size-batches` keeps the SFT loss curve visible in W&B instead of collapsing a full epoch into a single point.
 
@@ -259,7 +266,7 @@ SFT also runs a tokenization preflight. By default, rows that exceed `ART_MAX_SE
 
 Training scripts use W&B Artifacts and Weave Evaluations for lineage:
 
-- `retail-course-data:latest` contains the TAU Retail JSONL splits plus generated `sft_train.jsonl`.
+- `retail-course-data:latest` contains the TAU Retail JSONL splits plus generated `sft_full.jsonl` and `sft_next_action.jsonl`.
 - Data artifacts include all `sft*.jsonl` files plus summary JSON files in the data directory, so full-trajectory, next-action, teacher-mixed, AReaL-derived, and success-trace SFT variants can be traced.
 - SFT logs the latest local ART LoRA checkpoint as `<ART_MODEL_NAME>-checkpoint:sft-anchor`, including the exact `sft_file` and `sft_mask_mode` in checkpoint metadata.
 - GRPO, GSPO, and RULER runs call `use_artifact` on the SFT checkpoint and log their own branch checkpoint artifacts.
@@ -300,19 +307,11 @@ Reward and SFT data design notes: [course/04_grpo_local/reward_and_sft_design_no
 
 Official tau2 evaluation bridge: [course/02_weave_evals/official_tau2_eval_bridge.md](course/02_weave_evals/official_tau2_eval_bridge.md). Use this only when you need a benchmark-grade runtime comparison in addition to the course success metric.
 
-## Validated Course Result
+## Validation Outputs
 
-The validated H100 path uses `LiquidAI/LFM2.5-8B-A1B`, bridge next-action rows, public teacher next-action rows, last-assistant SFT masking, and 18-step GRPO from the SFT anchor. The selected RL checkpoint is chosen by fresh held-out validation, not by assuming the latest training step is best.
+The validated H100 path uses `LiquidAI/LFM2.5-8B-A1B`, task-disjoint bridge next-action rows, task-fold-filtered public teacher next-action rows, last-assistant SFT masking, and GRPO from the SFT anchor. Candidate RL checkpoints are forked and evaluated on held-out validation, so the final comparison does not assume the latest training step is best.
 
-Held-out checkpoint validation from the current course recipe:
-
-| Stage | `retail_task_success` | `state_action_sequence_match` | `valid_state_action_rate` | `bad_state_action` | `missing_state_action` |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Baseline | 0.160 | 0.160 | 0.160 | 0.480 | 0.840 |
-| SFT anchor | 0.240 | 0.280 | 0.300 | 0.400 | 0.680 |
-| Short GRPO selected checkpoint | 0.280 | 0.360 | 0.360 | 0.160 | 0.640 |
-
-The longer GRPO exploration run reached stronger training-rollout signals but did not improve monotonically on held-out validation. The course therefore treats checkpoint selection as part of the agentic RL workflow: use W&B curves to shortlist candidates, then validate candidate checkpoints on held-out scenarios and inspect Weave traces before choosing a model artifact.
+The runbook writes `checkpoint_eval_summary.md/.csv` and `checkpoint_acceptance.md/.json`. For the course result, GRPO should clear the acceptance gate against the SFT anchor on held-out validation: higher reward, higher `retail_task_success` or state-action success, and lower state-action error. W&B stores the horizontal comparison table, and Weave stores the rollout traces behind each evaluation row.
 
 ## Model Selection
 

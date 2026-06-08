@@ -6,6 +6,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import argparse
+import hashlib
 import json
 import urllib.parse
 import urllib.request
@@ -16,6 +17,20 @@ from course.shared.data import load_cached_split, normalize_messages_for_sft, wr
 
 
 DEFAULT_TEACHER_DATASET = "amityco/tau-bench-retail-train-next-action-all-step-score-v0.2"
+
+
+def holdout_bucket(key: str, modulo: int) -> int:
+    digest = hashlib.md5(key.encode("utf-8")).hexdigest()
+    return int(digest, 16) % modulo
+
+
+def passes_holdout_filter(row: dict[str, Any], *, holdout_modulo: int | None, sft_remainder: int | None) -> bool:
+    if holdout_modulo is None:
+        return True
+    sample_idx = row.get("sample_idx")
+    if sample_idx is None:
+        return False
+    return holdout_bucket(str(sample_idx), holdout_modulo) == sft_remainder
 
 
 def load_retail_tools(data_dir: Path) -> list[dict[str, Any]]:
@@ -287,11 +302,31 @@ def main() -> None:
     parser.add_argument("--min-avg-score", type=float, default=1.0, help="Use -1 to disable this filter.")
     parser.add_argument("--keep-unknown-tools", action="store_true")
     parser.add_argument(
+        "--holdout-modulo",
+        type=int,
+        default=None,
+        help="When set, keep only teacher rows whose sample_idx hashes into --sft-remainder.",
+    )
+    parser.add_argument(
+        "--sft-remainder",
+        type=int,
+        default=None,
+        help="Remainder used with --holdout-modulo for disjoint teacher SFT filtering.",
+    )
+    parser.add_argument(
         "--allow-small-tool-schema",
         action="store_true",
         help="Allow converting with a tiny smoke-test tool schema. Not recommended for retail teacher SFT.",
     )
     args = parser.parse_args()
+
+    if (args.holdout_modulo is None) != (args.sft_remainder is None):
+        raise SystemExit("--holdout-modulo and --sft-remainder must be set together.")
+    if args.holdout_modulo is not None:
+        if args.holdout_modulo <= 1:
+            raise SystemExit("--holdout-modulo must be greater than 1.")
+        if not 0 <= args.sft_remainder < args.holdout_modulo:
+            raise SystemExit("--sft-remainder must be in [0, holdout_modulo).")
 
     tools = load_retail_tools(Path(args.tools_data_dir))
     if len(tools) < 8 and not args.allow_small_tool_schema:
@@ -303,10 +338,14 @@ def main() -> None:
 
     converted: list[dict[str, Any]] = []
     source_rows = 0
+    skipped_holdout = 0
     for row_index, row in enumerate(
         load_source_rows(args.dataset_id, args.split, max_source_rows=args.max_source_rows)
     ):
         source_rows += 1
+        if not passes_holdout_filter(row, holdout_modulo=args.holdout_modulo, sft_remainder=args.sft_remainder):
+            skipped_holdout += 1
+            continue
         example = convert_teacher_row(
             row,
             row_index=row_index,
@@ -318,6 +357,10 @@ def main() -> None:
             min_avg_score=optional_score(args.min_avg_score),
         )
         if example is not None:
+            if args.holdout_modulo is not None:
+                metadata = example.setdefault("metadata", {})
+                metadata["teacher_holdout_modulo"] = args.holdout_modulo
+                metadata["teacher_sft_remainder"] = args.sft_remainder
             converted.append(example)
         if args.limit is not None and len(converted) >= args.limit:
             break
@@ -328,6 +371,7 @@ def main() -> None:
             "dataset_id": args.dataset_id,
             "split": args.split,
             "source_rows_scanned": source_rows,
+            "skipped_holdout": skipped_holdout,
             "converted_rows": count,
             "output": args.output,
             "tools": len(tools),

@@ -21,7 +21,11 @@ def metadata(record: dict[str, Any]) -> dict[str, Any]:
 
 def task_key(record: dict[str, Any]) -> str:
     meta = metadata(record)
-    return str(meta.get("task_id") or meta.get("record_id") or record.get("id"))
+    for key in ("task_id", "record_id"):
+        value = meta.get(key)
+        if value is not None:
+            return str(value)
+    return str(record.get("id"))
 
 
 def holdout_bucket(key: str, modulo: int) -> int:
@@ -169,17 +173,20 @@ def select_rows(records: list[dict[str, Any]], args: argparse.Namespace) -> list
 
 
 def split_rows(rows: list[dict[str, Any]], args: argparse.Namespace) -> dict[str, list[dict[str, Any]]]:
-    buckets = {"train": [], "validation": [], "test": []}
+    buckets = {"sft": [], "train": [], "validation": [], "test": []}
     for row in rows:
         bucket = holdout_bucket(task_key(row), args.holdout_modulo)
         if bucket == args.validation_remainder:
             target = "validation"
         elif bucket == args.test_remainder:
             target = "test"
+        elif bucket == args.sft_remainder:
+            target = "sft"
         else:
             target = "train"
         buckets[target].append(row)
     limits = {
+        "sft": args.limit_sft,
         "train": args.limit_train,
         "validation": args.limit_validation,
         "test": args.limit_test,
@@ -233,20 +240,42 @@ def main() -> None:
     parser.add_argument("--holdout-modulo", type=int, default=5)
     parser.add_argument("--validation-remainder", type=int, default=0)
     parser.add_argument("--test-remainder", type=int, default=1)
+    parser.add_argument("--sft-remainder", type=int, default=2)
+    parser.add_argument("--limit-sft", type=int, default=None)
     parser.add_argument("--limit-train", type=int, default=None)
     parser.add_argument("--limit-validation", type=int, default=None)
     parser.add_argument("--limit-test", type=int, default=None)
     args = parser.parse_args()
 
-    if args.holdout_modulo <= 2:
-        raise ValueError("--holdout-modulo must be greater than 2")
-    if args.validation_remainder == args.test_remainder:
-        raise ValueError("--validation-remainder and --test-remainder must differ")
+    if args.holdout_modulo <= 3:
+        raise ValueError("--holdout-modulo must be greater than 3")
+    remainders = {
+        "validation": args.validation_remainder,
+        "test": args.test_remainder,
+        "sft": args.sft_remainder,
+    }
+    for name, remainder in remainders.items():
+        if remainder < 0 or remainder >= args.holdout_modulo:
+            raise ValueError(f"--{name}-remainder must be in [0, holdout_modulo)")
+    if len(set(remainders.values())) != len(remainders):
+        raise ValueError("--validation-remainder, --test-remainder, and --sft-remainder must all differ")
 
     records = load_cached_split(args.source_dir, args.source_split)
     selected = select_rows(records, args)
     rows_by_split = split_rows(selected, args)
     output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for stale_name in (
+        "sft_train.jsonl",
+        "sft_train_next_action.jsonl",
+        "sft_validation.jsonl",
+        "sft_validation_next_action.jsonl",
+        "sft_test.jsonl",
+        "sft_test_next_action.jsonl",
+    ):
+        stale_path = output_dir / stale_name
+        if stale_path.exists():
+            stale_path.unlink()
     annotated_by_split = {
         split: [annotate(row, split=split, name=args.name, args=args) for row in rows]
         for split, rows in rows_by_split.items()
@@ -254,16 +283,19 @@ def main() -> None:
 
     for split, rows in annotated_by_split.items():
         write_jsonl(output_dir / f"{split}.jsonl", rows)
-        write_sft_jsonl(rows, output_dir / f"sft_{split}.jsonl")
+        if split == "sft":
+            write_sft_jsonl(rows, output_dir / "sft_full.jsonl")
 
     next_action_module = importlib.import_module("course.03_sft_warmup.make_next_action_sft_jsonl")
     record_to_next_action_examples = next_action_module.record_to_next_action_examples
 
     for split, rows in annotated_by_split.items():
+        if split != "sft":
+            continue
         next_action_examples: list[dict[str, Any]] = []
         for row in rows:
             next_action_examples.extend(record_to_next_action_examples(row))
-        write_jsonl(output_dir / f"sft_{split}_next_action.jsonl", next_action_examples)
+        write_jsonl(output_dir / "sft_next_action.jsonl", next_action_examples)
 
     stats = summary(annotated_by_split, output_dir=output_dir, args=args)
     (output_dir / "bridge_curriculum_summary.json").write_text(

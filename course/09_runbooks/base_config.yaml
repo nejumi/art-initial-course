@@ -44,6 +44,7 @@ profiles:
       rl_steps: 1
       rl_groups_per_step: 2
       rl_rollouts_per_scenario: 2
+      rl_max_sampling_rounds: 1
       rl_learning_rate: 0.000002
       max_completion_tokens: 256
       art_seq_length: 8192
@@ -75,6 +76,7 @@ profiles:
       rl_steps: 2
       rl_groups_per_step: 4
       rl_rollouts_per_scenario: 4
+      rl_max_sampling_rounds: 1
       rl_learning_rate: 0.000001
       max_completion_tokens: 512
       art_seq_length: 12288
@@ -105,6 +107,7 @@ profiles:
       rl_steps: 6
       rl_groups_per_step: 4
       rl_rollouts_per_scenario: 4
+      rl_max_sampling_rounds: 1
       rl_learning_rate: 0.000001
       max_completion_tokens: 512
       art_seq_length: 12288
@@ -114,14 +117,17 @@ profiles:
       vllm_max_num_seqs: 8
 
   validated_h100:
-    description: "Validated LFM2.5 8B course profile: teacher-mix SFT followed by 18-step GRPO."
+    description: "Validated disjoint LFM2.5 8B course profile: SFT, GRPO rollout, and validation use separate scenarios."
     args:
-      run_slug: lfm25-8b-a1b-retail-validated
-      data_dir: .art/curriculum_data/retail_bridge_state1_validated
+      run_slug: lfm25-8b-a1b-retail-strict-disjoint
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_disjoint
       source_dir: .art/full_data/retail
-      data_artifact_name: retail-course-data-validated
+      data_artifact_name: retail-course-data-strict-disjoint
       build_bridge: true
-      bridge_max_per_task: 2
+      bridge_max_tool_calls: 8
+      bridge_max_turns: 32
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
       include_teacher_sft: true
       teacher_sft_limit: 512
       eval_limit: 25
@@ -129,12 +135,13 @@ profiles:
       sft_chunk_size_batches: 12
       sft_peak_lr: 0.00001
       rl_algos: grpo
-      rl_suffix: validated-balanced-s18-g8-r8
+      rl_suffix: strict-disjoint-balanced-s18-g8-r8
       reward_profile: tau_irc_balanced
-      rl_train_limit: 48
+      rl_train_limit: 144
       rl_steps: 18
       rl_groups_per_step: 8
       rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 1
       rl_learning_rate: 0.000001
       eval_rl_candidates: true
       max_completion_tokens: 768
@@ -147,12 +154,15 @@ profiles:
   validated_long_h100:
     description: Alias-style longer GRPO validation profile with isolated artifact names.
     args:
-      run_slug: lfm25-8b-a1b-retail-validated-long
-      data_dir: .art/curriculum_data/retail_bridge_state1_validated_long
+      run_slug: lfm25-8b-a1b-retail-strict-validated-long
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_validated_long
       source_dir: .art/full_data/retail
-      data_artifact_name: retail-course-data-validated-long
+      data_artifact_name: retail-course-data-strict-validated-long
       build_bridge: true
-      bridge_max_per_task: 2
+      bridge_max_tool_calls: 8
+      bridge_max_turns: 32
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
       include_teacher_sft: true
       teacher_sft_limit: 512
       eval_limit: 25
@@ -160,12 +170,13 @@ profiles:
       sft_chunk_size_batches: 12
       sft_peak_lr: 0.00001
       rl_algos: grpo
-      rl_suffix: validated-long-balanced-s18-g8-r8
+      rl_suffix: strict-validated-long-balanced-s18-g8-r8
       reward_profile: tau_irc_balanced
-      rl_train_limit: 48
+      rl_train_limit: 144
       rl_steps: 18
       rl_groups_per_step: 8
       rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 1
       rl_learning_rate: 0.000001
       eval_rl_candidates: true
       max_completion_tokens: 768
@@ -178,12 +189,15 @@ profiles:
   validated_sft_heavy_h100:
     description: SFT-heavy validation profile for offline comparison after the main validated run.
     args:
-      run_slug: lfm25-8b-a1b-retail-validated-sft-heavy
-      data_dir: .art/curriculum_data/retail_bridge_state1_validated_sft_heavy
+      run_slug: lfm25-8b-a1b-retail-strict-sft-heavy
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_sft_heavy
       source_dir: .art/full_data/retail
-      data_artifact_name: retail-course-data-validated-sft-heavy
+      data_artifact_name: retail-course-data-strict-sft-heavy
       build_bridge: true
-      bridge_max_per_task: 2
+      bridge_max_tool_calls: 8
+      bridge_max_turns: 32
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
       include_teacher_sft: true
       teacher_sft_limit: 1024
       include_success_trace_sft: true
@@ -193,13 +207,167 @@ profiles:
       sft_chunk_size_batches: 16
       sft_peak_lr: 0.00001
       rl_algos: grpo
-      rl_suffix: sft-heavy-balanced-s18-g8-r8
+      rl_suffix: strict-sft-heavy-balanced-s18-g8-r8
       reward_profile: tau_irc_balanced
-      rl_train_limit: 48
+      rl_train_limit: 144
       rl_steps: 18
       rl_groups_per_step: 8
       rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 1
       rl_learning_rate: 0.000001
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_low_lr_h100:
+    description: Low-learning-rate GRPO hedge with the same strict disjoint split contract.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-low-lr
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_low_lr
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-low-lr
+      build_bridge: true
+      bridge_max_tool_calls: 8
+      bridge_max_turns: 32
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
+      include_teacher_sft: true
+      teacher_sft_limit: 512
+      eval_limit: 25
+      sft_max_steps: 180
+      sft_chunk_size_batches: 12
+      sft_peak_lr: 0.00001
+      rl_algos: grpo
+      rl_suffix: strict-low-lr-balanced-s22-g8-r8
+      reward_profile: tau_irc_balanced
+      rl_train_limit: 176
+      rl_steps: 22
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 1
+      rl_learning_rate: 0.0000003
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_resample_low_lr_h100:
+    description: GRPO-only hedge that reuses the strict SFT anchor and samples replacement scenarios when groups have no reward signal.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-disjoint
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_disjoint
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-disjoint
+      eval_limit: 25
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: grpo
+      rl_suffix: strict-resample-balanced-s16-g8-r8-lr5e7
+      reward_profile: tau_irc_balanced
+      rl_train_limit: 176
+      rl_steps: 16
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_resample_tauirc_h100:
+    description: GRPO-only tau_irc reward hedge that reuses the strict SFT anchor and samples replacement scenarios.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-disjoint
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_disjoint
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-disjoint
+      eval_limit: 25
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: grpo
+      rl_suffix: strict-resample-tauirc-s16-g8-r8-lr5e7
+      reward_profile: tau_irc
+      rl_train_limit: 176
+      rl_steps: 16
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_resample_cool_h100:
+    description: GRPO-only low-temperature hedge to keep successful SFT behaviors in the rollout distribution.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-disjoint
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_disjoint
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-disjoint
+      eval_limit: 25
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: grpo
+      rl_suffix: strict-resample-balanced-s16-g8-r8-lr5e7-temp05
+      reward_profile: tau_irc_balanced
+      rl_train_limit: 176
+      rl_steps: 16
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      rl_temperature: 0.5
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_resample_colder_h100:
+    description: GRPO-only lower-temperature hedge for more conservative rollouts from the strict SFT anchor.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-disjoint
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_disjoint
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-disjoint
+      eval_limit: 25
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: grpo
+      rl_suffix: strict-resample-balanced-s16-g8-r8-lr5e7-temp03
+      reward_profile: tau_irc_balanced
+      rl_train_limit: 176
+      rl_steps: 16
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      rl_temperature: 0.3
+      eval_rl_candidates: true
       max_completion_tokens: 768
       art_seq_length: 16384
       vllm_gpu_memory_utilization: 0.7
@@ -210,12 +378,15 @@ profiles:
   long_ablation_h100:
     description: Long ablation profile for offline experimentation; not intended for live hands-on delivery.
     args:
-      run_slug: lfm25-8b-a1b-retail-long-ablation
-      data_dir: .art/curriculum_data/retail_bridge_state1_long_ablation
+      run_slug: lfm25-8b-a1b-retail-strict-long-ablation
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_long_ablation
       source_dir: .art/full_data/retail
-      data_artifact_name: retail-course-data-long-ablation
+      data_artifact_name: retail-course-data-strict-long-ablation
       build_bridge: true
-      bridge_max_per_task: 2
+      bridge_max_tool_calls: 8
+      bridge_max_turns: 32
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
       include_teacher_sft: true
       teacher_sft_limit: 512
       eval_limit: 25
@@ -223,12 +394,13 @@ profiles:
       sft_chunk_size_batches: 12
       sft_peak_lr: 0.00001
       rl_algos: grpo
-      rl_suffix: long-tauirc-s48-g8-r8
+      rl_suffix: strict-long-tauirc-s22-g8-r8
       reward_profile: tau_irc
-      rl_train_limit: 52
-      rl_steps: 48
+      rl_train_limit: 176
+      rl_steps: 22
       rl_groups_per_step: 8
       rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 1
       rl_learning_rate: 0.000001
       max_completion_tokens: 768
       art_seq_length: 16384

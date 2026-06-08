@@ -121,6 +121,32 @@ def _safe_tag_value(value: str) -> str:
     return artifact_safe_name(value).lower()
 
 
+def _wandb_tag(label: str, value: str, *, max_length: int = 64) -> str:
+    safe_label = _safe_tag_value(label)[:24] or "tag"
+    safe_value = _safe_tag_value(value)
+    prefix = f"{safe_label}:"
+    full = f"{prefix}{safe_value}"
+    if len(full) <= max_length:
+        return full
+    digest = hashlib.sha1(full.encode("utf-8")).hexdigest()[:8]
+    room = max(1, max_length - len(prefix) - len(digest) - 1)
+    shortened = safe_value[:room].rstrip(".-") or safe_value[:room]
+    return f"{prefix}{shortened}-{digest}"
+
+
+def _normalize_wandb_tag(tag: str) -> str:
+    if ":" in tag:
+        label, value = tag.split(":", 1)
+    else:
+        label, value = "tag", tag
+    return _wandb_tag(label, value)
+
+
+def _normalize_wandb_tags(tags: Iterable[str]) -> list[str]:
+    normalized = [_normalize_wandb_tag(tag) for tag in tags if str(tag).strip()]
+    return list(dict.fromkeys(normalized))
+
+
 def _infer_stage(config: RetailCourseConfig, job_type: str) -> str:
     explicit = _env_value("COURSE_RUN_STAGE")
     if explicit:
@@ -225,19 +251,19 @@ def wandb_run_context(config: RetailCourseConfig, job_type: str) -> dict[str, st
 def default_wandb_tags(config: RetailCourseConfig, job_type: str) -> list[str]:
     context = wandb_run_context(config, job_type)
     tags = [
-        f"stage:{_safe_tag_value(context['stage'])}",
-        f"kind:{_safe_tag_value(context['kind'])}",
+        _wandb_tag("stage", context["stage"]),
+        _wandb_tag("kind", context["kind"]),
     ]
     if "algorithm" in context:
-        tags.append(f"algo:{_safe_tag_value(context['algorithm'])}")
+        tags.append(_wandb_tag("algo", context["algorithm"]))
     if "split" in context:
-        tags.append(f"split:{_safe_tag_value(context['split'])}")
+        tags.append(_wandb_tag("split", context["split"]))
     if "run_profile" in context:
-        tags.append(f"profile:{_safe_tag_value(context['run_profile'])}")
+        tags.append(_wandb_tag("profile", context["run_profile"]))
     if "reward_profile" in context and context["kind"] in {"training", "eval", "comparison"}:
-        tags.append(f"reward:{_safe_tag_value(context['reward_profile'])}")
+        tags.append(_wandb_tag("reward", context["reward_profile"]))
     if "slurm_job_id" in context:
-        tags.append(f"slurm:{_safe_tag_value(context['slurm_job_id'])}")
+        tags.append(_wandb_tag("slurm", context["slurm_job_id"]))
     return list(dict.fromkeys(tags))
 
 
@@ -304,7 +330,7 @@ def apply_wandb_run_metadata(
     notes: str | None = None,
 ) -> None:
     context = wandb_run_context(config, job_type)
-    tag_list = list(dict.fromkeys([*default_wandb_tags(config, job_type), *tags]))
+    tag_list = _normalize_wandb_tags([*default_wandb_tags(config, job_type), *tags])
     try:
         run.tags = tuple(tag_list)
     except Exception:
@@ -355,7 +381,7 @@ def ensure_wandb_run(
         project=config.project,
         entity=config.entity,
         job_type=job_type,
-        tags=list(dict.fromkeys([*default_wandb_tags(config, job_type), *tags])),
+        tags=_normalize_wandb_tags([*default_wandb_tags(config, job_type), *tags]),
         notes=notes or default_wandb_notes(config, job_type),
         config={
             "course": "openpipe-art-retail",

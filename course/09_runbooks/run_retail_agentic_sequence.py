@@ -102,14 +102,23 @@ def candidate_model_name(branch_model: str, step: int) -> str:
 
 
 def read_top_candidate_step(path: Path) -> int | None:
+    steps = read_candidate_steps(path)
+    return steps[0] if steps else None
+
+
+def read_candidate_steps(path: Path) -> list[int]:
     if not path.exists():
-        return None
+        return []
     data = json.loads(path.read_text(encoding="utf-8"))
     candidates = data.get("candidates") if isinstance(data, dict) else None
     if not isinstance(candidates, list) or not candidates:
-        return None
-    step = candidates[0].get("step") if isinstance(candidates[0], dict) else None
-    return int(step) if step is not None else None
+        return []
+    steps: list[int] = []
+    for candidate in candidates:
+        step = candidate.get("step") if isinstance(candidate, dict) else None
+        if step is not None:
+            steps.append(int(step))
+    return steps
 
 
 def candidate_step_from_eval_path(path: Path) -> int | None:
@@ -319,6 +328,12 @@ def build_or_refresh_data(args: argparse.Namespace, env: dict[str, str]) -> None
             str(args.bridge_max_per_task),
             "--holdout-modulo",
             str(args.bridge_holdout_mod),
+            "--sft-remainder",
+            str(args.bridge_sft_remainder),
+            "--validation-remainder",
+            str(args.bridge_validation_remainder),
+            "--test-remainder",
+            str(args.bridge_test_remainder),
         ],
         env=env,
         dry_run=args.dry_run,
@@ -336,12 +351,12 @@ def augmented_sft_file(args: argparse.Namespace) -> Path:
     if args.include_success_trace_sft:
         labels.append("success_trace")
     if labels:
-        return args.data_dir / f"sft_train_next_action_{'_'.join(labels)}_mix.jsonl"
-    return args.data_dir / "sft_train_next_action.jsonl"
+        return args.data_dir / f"sft_next_action_{'_'.join(labels)}_mix.jsonl"
+    return args.data_dir / "sft_next_action.jsonl"
 
 
 def build_augmented_sft(args: argparse.Namespace, env: dict[str, str]) -> None:
-    inputs = [args.data_dir / "sft_train_next_action.jsonl"]
+    inputs = [args.data_dir / "sft_next_action.jsonl"]
     limits = [args.bridge_sft_limit]
     source_labels = ["bridge"]
 
@@ -404,6 +419,10 @@ def build_teacher_sft(args: argparse.Namespace, env: dict[str, str]) -> Path:
             str(args.teacher_sft_min_total_score),
             "--min-avg-score",
             str(args.teacher_sft_min_avg_score),
+            "--holdout-modulo",
+            str(args.bridge_holdout_mod),
+            "--sft-remainder",
+            str(args.bridge_sft_remainder),
         ],
         env=env,
         dry_run=args.dry_run,
@@ -631,6 +650,8 @@ def train_rl_branch(
         str(args.rl_groups_per_step),
         "--rollouts-per-scenario",
         str(args.rl_rollouts_per_scenario),
+        "--max-sampling-rounds",
+        str(args.rl_max_sampling_rounds),
         "--learning-rate",
         str(args.rl_learning_rate),
         "--temperature",
@@ -692,104 +713,106 @@ def train_rl_branch(
             ),
             dry_run=args.dry_run,
         )
-        top_step = args.rl_steps if args.dry_run else read_top_candidate_step(candidate_json)
-        if args.eval_rl_candidates and top_step is not None:
-            candidate_model = candidate_model_name(branch_model, top_step)
-            candidate_artifact = f"{candidate_model}-checkpoint"
-            step_label = f"{top_step:04d}"
-            candidate_env = {
-                **stage_env(env, stage=f"{algo}-candidate-step{step_label}", kind="artifact", algo=algo),
-                "ART_MODEL_NAME": candidate_model,
-            }
-            run_command(
-                f"fork {algo} candidate checkpoint step {step_label}",
-                [
-                    sys.executable,
-                    "-B",
-                    "course/08_enterprise_ops/fork_checkpoint.py",
-                    "--from-model",
-                    branch_model,
-                    "--to-model",
-                    candidate_model,
-                    "--not-after-step",
-                    str(top_step),
-                    "--file-only",
-                    "--overwrite",
-                    "--verbose",
-                ],
-                env=candidate_env,
-                dry_run=args.dry_run,
-            )
-            run_command(
-                f"log {algo} candidate checkpoint artifact step {step_label}",
-                [
-                    sys.executable,
-                    "-B",
-                    "course/07_models_registry_weave/log_checkpoint_artifact.py",
-                    "--model-name",
-                    candidate_model,
-                    "--stage",
-                    f"{algo}-candidate-step{step_label}",
-                    "--artifact-name",
-                    candidate_artifact,
-                    "--alias",
-                    "validation-candidate",
-                    "--metadata",
-                    f"algorithm={json.dumps(algo)}",
-                    "--metadata",
-                    f"source_model={json.dumps(branch_model)}",
-                    "--metadata",
-                    f"source_step={top_step}",
-                    "--metadata",
-                    f"selection_metric={json.dumps(args.rl_candidate_metric)}",
-                    "--metadata",
-                    f"data_artifact={json.dumps(artifact_uri(args.data_artifact_name))}",
-                ],
-                env=candidate_env,
-                dry_run=args.dry_run,
-            )
-            candidate_validation_env = {
-                **stage_env(
-                    env,
-                    stage=f"{algo}-candidate-validation-eval",
-                    kind="eval",
-                    algo=algo,
-                    split=args.eval_split,
-                ),
-                "ART_MODEL_NAME": candidate_model,
-            }
-            run_command(
-                f"eval {algo} candidate step {step_label} validation",
-                evaluate_command(
-                    args,
-                    data_dir=args.data_dir,
-                    split=args.eval_split,
-                    limit=args.eval_limit,
-                    output=report_dir / f"eval_{algo}_{args.rl_suffix}_candidate_step{step_label}_validation.jsonl",
-                    model_artifact=artifact_uri(candidate_artifact, "validation-candidate"),
-                    include_messages=True,
-                ),
-                env=candidate_validation_env,
-                dry_run=args.dry_run,
-            )
-    branch_train_eval_env = {
-        **stage_env(env, stage=f"{algo}-train-subset-eval", kind="eval", algo=algo, split=args.rl_split),
-        "ART_MODEL_NAME": branch_model,
-    }
-    run_command(
-        f"eval {algo} train subset",
-        evaluate_command(
-            args,
-            data_dir=args.data_dir,
-            split=args.rl_split,
-            limit=args.rl_train_limit,
-            output=report_dir / f"eval_{algo}_{args.rl_suffix}_train{args.rl_train_limit}.jsonl",
-            model_artifact=artifact_uri(f"{branch_model}-checkpoint"),
-            include_messages=True,
-        ),
-        env=branch_train_eval_env,
-        dry_run=args.dry_run,
-    )
+        candidate_steps = [args.rl_steps] if args.dry_run else read_candidate_steps(candidate_json)
+        if args.eval_rl_candidates and candidate_steps:
+            for top_step in candidate_steps:
+                candidate_model = candidate_model_name(branch_model, top_step)
+                candidate_artifact = f"{candidate_model}-checkpoint"
+                step_label = f"{top_step:04d}"
+                candidate_env = {
+                    **stage_env(env, stage=f"{algo}-candidate-step{step_label}", kind="artifact", algo=algo),
+                    "ART_MODEL_NAME": candidate_model,
+                }
+                run_command(
+                    f"fork {algo} candidate checkpoint step {step_label}",
+                    [
+                        sys.executable,
+                        "-B",
+                        "course/08_enterprise_ops/fork_checkpoint.py",
+                        "--from-model",
+                        branch_model,
+                        "--to-model",
+                        candidate_model,
+                        "--not-after-step",
+                        str(top_step),
+                        "--file-only",
+                        "--overwrite",
+                        "--verbose",
+                    ],
+                    env=candidate_env,
+                    dry_run=args.dry_run,
+                )
+                run_command(
+                    f"log {algo} candidate checkpoint artifact step {step_label}",
+                    [
+                        sys.executable,
+                        "-B",
+                        "course/07_models_registry_weave/log_checkpoint_artifact.py",
+                        "--model-name",
+                        candidate_model,
+                        "--stage",
+                        f"{algo}-candidate-step{step_label}",
+                        "--artifact-name",
+                        candidate_artifact,
+                        "--alias",
+                        "validation-candidate",
+                        "--metadata",
+                        f"algorithm={json.dumps(algo)}",
+                        "--metadata",
+                        f"source_model={json.dumps(branch_model)}",
+                        "--metadata",
+                        f"source_step={top_step}",
+                        "--metadata",
+                        f"selection_metric={json.dumps(args.rl_candidate_metric)}",
+                        "--metadata",
+                        f"data_artifact={json.dumps(artifact_uri(args.data_artifact_name))}",
+                    ],
+                    env=candidate_env,
+                    dry_run=args.dry_run,
+                )
+                candidate_validation_env = {
+                    **stage_env(
+                        env,
+                        stage=f"{algo}-candidate-validation-eval",
+                        kind="eval",
+                        algo=algo,
+                        split=args.eval_split,
+                    ),
+                    "ART_MODEL_NAME": candidate_model,
+                }
+                run_command(
+                    f"eval {algo} candidate step {step_label} validation",
+                    evaluate_command(
+                        args,
+                        data_dir=args.data_dir,
+                        split=args.eval_split,
+                        limit=args.eval_limit,
+                        output=report_dir / f"eval_{algo}_{args.rl_suffix}_candidate_step{step_label}_validation.jsonl",
+                        model_artifact=artifact_uri(candidate_artifact, "validation-candidate"),
+                        include_messages=True,
+                    ),
+                    env=candidate_validation_env,
+                    dry_run=args.dry_run,
+                )
+    if not args.skip_rl_train_eval:
+        branch_train_eval_env = {
+            **stage_env(env, stage=f"{algo}-train-subset-eval", kind="eval", algo=algo, split=args.rl_split),
+            "ART_MODEL_NAME": branch_model,
+        }
+        run_command(
+            f"eval {algo} train subset",
+            evaluate_command(
+                args,
+                data_dir=args.data_dir,
+                split=args.rl_split,
+                limit=args.rl_train_limit,
+                output=report_dir / f"eval_{algo}_{args.rl_suffix}_train{args.rl_train_limit}.jsonl",
+                model_artifact=artifact_uri(f"{branch_model}-checkpoint"),
+                include_messages=True,
+            ),
+            env=branch_train_eval_env,
+            dry_run=args.dry_run,
+        )
     branch_validation_eval_env = {
         **stage_env(env, stage=f"{algo}-validation-eval", kind="eval", algo=algo, split=args.eval_split),
         "ART_MODEL_NAME": branch_model,
@@ -962,6 +985,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--bridge-max-turns", type=int, default=28)
     parser.add_argument("--bridge-max-per-task", type=int, default=2)
     parser.add_argument("--bridge-holdout-mod", type=int, default=5)
+    parser.add_argument("--bridge-sft-remainder", type=int, default=2)
+    parser.add_argument("--bridge-validation-remainder", type=int, default=0)
+    parser.add_argument("--bridge-test-remainder", type=int, default=1)
     parser.add_argument("--bridge-sft-limit", type=int, default=-1)
     parser.add_argument("--include-teacher-sft", action="store_true")
     parser.add_argument(
@@ -1030,6 +1056,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rl-steps", type=int, default=32)
     parser.add_argument("--rl-groups-per-step", type=int, default=4)
     parser.add_argument("--rl-rollouts-per-scenario", type=int, default=8)
+    parser.add_argument("--rl-max-sampling-rounds", type=int, default=1)
     parser.add_argument("--rl-learning-rate", type=float, default=2e-6)
     parser.add_argument("--rl-temperature", type=float, default=0.9)
     parser.add_argument("--rl-max-turns", type=int, default=None)
@@ -1063,6 +1090,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-sft", action="store_true")
     parser.add_argument("--skip-sft-eval", action="store_true")
     parser.add_argument("--skip-rl", action="store_true")
+    parser.add_argument(
+        "--skip-rl-train-eval",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Skip post-training eval on RL training scenarios; validation remains enabled.",
+    )
     parser.add_argument("--skip-compare", action="store_true")
     parser.add_argument(
         "--skip-weave-cached-evals",

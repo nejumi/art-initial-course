@@ -76,6 +76,15 @@ async def main_async() -> None:
     records = load_cached_split(data_dir, args.split, limit=args.limit)
     scenarios = scenarios_from_records(records, split=args.split)
     rng = random.Random(args.seed)
+    minimum_scenarios = args.steps * args.groups_per_step
+    if len(scenarios) < minimum_scenarios:
+        raise ValueError(
+            "RULER-GRPO requires at least one unique scenario per trajectory group: "
+            f"steps={args.steps} * groups_per_step={args.groups_per_step} "
+            f"needs {minimum_scenarios}, got {len(scenarios)}."
+        )
+    scenario_pool = list(scenarios)
+    rng.shuffle(scenario_pool)
 
     backend = make_local_backend(cfg.art_path, gpu_cost_per_hour_usd=args.gpu_cost_per_hour_usd)
     model = make_trainable_model(cfg)
@@ -141,7 +150,10 @@ async def main_async() -> None:
         dropped_no_signal_groups = 0
         for _sampling_round in range(args.max_sampling_rounds):
             needed = max(args.groups_per_step - len(groups), 1)
-            batch = rng.sample(scenarios, k=min(needed, len(scenarios)))
+            if not scenario_pool:
+                break
+            take = min(needed, len(scenario_pool))
+            batch = [scenario_pool.pop() for _ in range(take)]
             sampled_groups = await art.gather_trajectory_groups(
                 (
                     art.TrajectoryGroup(
@@ -178,6 +190,7 @@ async def main_async() -> None:
             "data/step_num_groups_sampled_before_filter": float(submitted_groups),
             "data/step_num_groups_dropped_no_reward_signal": float(dropped_no_signal_groups),
             "data/step_trainable_group_fraction": float(len(groups) / submitted_groups) if submitted_groups else 0.0,
+            "data/step_unique_scenarios_remaining": float(len(scenario_pool)),
             **reward_signal_metrics(all_sampled_groups, prefix="data/sample"),
             **reward_signal_metrics(all_dropped_groups, prefix="data/dropped"),
         }

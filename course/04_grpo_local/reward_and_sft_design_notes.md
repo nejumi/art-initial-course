@@ -49,12 +49,13 @@ Avoid these SFT anti-patterns:
 - Overfitting only the shortest or easiest successful traces; this can raise SFT eval while starving RL of useful error branches.
 - Promoting a checkpoint based only on loss. The acceptance gate must also inspect outcome, state-changing action correctness, missing/bad action rates, and Weave traces.
 
-Split and leakage hygiene:
+Split contract:
 
 - Preserve source dataset, source task ID, trace ID, row index, reward, and filter flags in every generated SFT row.
 - Include generated summary JSON files in the W&B data artifact, not just the final mixed JSONL.
-- Audit overlap between mixed SFT source IDs and held-out eval/task IDs before presenting official tau2-style numbers.
-- Treat public teacher/success-trace mixtures as training material unless the held-out eval tasks are known not to have entered the teacher data.
+- Build separate `sft`, `train`, `validation`, and `test` buckets by task hash.
+- Filter public teacher rows with the same task-hash rule and keep only the SFT fold before mixing.
+- Use `train` only for GRPO/GSPO/RULER rollouts and `validation` only for checkpoint comparison.
 
 Optional RFT bridge:
 
@@ -90,7 +91,7 @@ Before training, normalize demonstrations:
 - Assistant turns with `tool_calls` should have empty assistant text.
 - Strip or avoid inline `<thinking>` content when training models that may emit reasoning tags instead of tool calls.
 - Add a strict tool-use system instruction for local open-weight models that otherwise mix text and tool calls.
-- Prefer successful trajectories and keep train/validation/test split provenance in W&B Artifacts.
+- Prefer successful trajectories and keep SFT, RL rollout, validation, and test split provenance in W&B Artifacts.
 - Run tokenization preflight and filter overlength trajectories before SFT. If long rows are left in the batch stream, ART drops them internally, which creates zero-loss batches and noisy classroom charts.
 
 ART's local SFT path applies response-only masking to assistant responses in the rendered chat template. For full demonstration trajectories, this is usually what we want: every assistant response in the successful trajectory is supervised. For next-action teacher datasets, be explicit about the intended format. If prior assistant turns should be context only, flatten the prior conversation or add a custom last-answer-only SFT path instead of silently training on every assistant turn.
@@ -99,11 +100,11 @@ The course now exposes both formats:
 
 - `make_sft_jsonl.py` writes full-trajectory examples and should use `--sft-mask-mode all-assistant`.
 - `make_next_action_sft_jsonl.py` expands each full trajectory into per-turn next-action rows and should use `--sft-mask-mode last-assistant`.
-- `make_teacher_next_action_sft_jsonl.py` converts scored public teacher next-action rows from `amityco/...all-step-score-v0.2`; use it when the base bridge SFT is too weak for convincing RL.
+- `make_teacher_next_action_sft_jsonl.py` converts scored public teacher next-action rows from `amityco/...all-step-score-v0.2`; the runbook filters these rows to the SFT task fold before mixing.
 - `make_areal_retail_sft_jsonl.py` converts AReaL tau2 retail next-action rows and should also use `--sft-mask-mode last-assistant`.
 - `make_success_trace_retail_sft_jsonl.py` converts successful tau2 retail traces into next-action rows. It prepends the local retail system prompt, assigns missing tool-call IDs, attaches the local tool schema, and filters to clean reward-1 traces by default.
 - `mix_sft_jsonl.py` mixes bridge, teacher, AReaL, and success-trace SFT sources while preserving source metadata for W&B artifact lineage.
-- `make_bridge_curriculum.py` builds a shorter first RL curriculum from successful trajectories with a bounded number of state-changing actions. This is useful for proving that RL can improve a verifiable state/action objective before moving to the broader retail split.
+- `make_bridge_curriculum.py` builds a shorter first RL curriculum from successful trajectories with a bounded number of state-changing actions. It writes disjoint `sft`, `train`, `validation`, and `test` buckets by task hash. SFT uses `sft_next_action.jsonl`, GRPO/GSPO/RULER rollouts use `train.jsonl`, and checkpoint validation uses `validation.jsonl`.
 
 Do not promote an SFT checkpoint to the RL parent just because the loss decreases. First compare it to the base model with Weave evals and a horizontal W&B table. For this lab, a usable SFT parent should improve or at least preserve `outcome_success` and `task_success`, while also improving tool-call diagnostics such as `tool_name_f1`, `tool_argument_match`, or state-changing action correctness.
 
@@ -114,7 +115,7 @@ For a production-quality or advanced course variant, consider swapping in or com
 - `Jarrodbarnes/tau2-sft-v4-dataset`
 - `HuggingFaceH4/tau2-bench-data`
 
-The helper `course/03_sft_warmup/make_teacher_next_action_sft_jsonl.py` converts the scored amityco rows into ART-compatible next-action JSONL. The default filter keeps rows with `total_score >= 1.0` and `avg_score >= 1.0`, drops answer turns with unknown tools, and attaches the canonical retail tool schema from the local bridge data. The instructor runbook can enable this with `--include-teacher-sft`, producing `sft_train_next_action_teacher_mix.jsonl` plus a JSON summary that is included in the W&B data artifact.
+The helper `course/03_sft_warmup/make_teacher_next_action_sft_jsonl.py` converts the scored amityco rows into ART-compatible next-action JSONL. The default filter keeps rows with `total_score >= 1.0` and `avg_score >= 1.0`, drops answer turns with unknown tools, attaches the canonical retail tool schema from the local bridge data, and can restrict `sample_idx` to the configured SFT task fold. The instructor runbook enables this with `--include-teacher-sft`, producing `sft_next_action_teacher_mix.jsonl` plus a JSON summary that is included in the W&B data artifact.
 
 The helper `course/03_sft_warmup/make_areal_retail_sft_jsonl.py` converts the retail, correct rows from `inclusionAI/AReaL-tau2-data` into ART-compatible JSONL for advanced experiments. It strips `thinking`, removes `None` tool arguments, assigns missing tool-call IDs, and attaches the canonical retail tool schemas from a local TAU retail data directory.
 

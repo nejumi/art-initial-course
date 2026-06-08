@@ -474,6 +474,111 @@ profiles:
       vllm_max_num_batched_tokens: 16384
       vllm_max_num_seqs: 8
 
+  strict_prompted_wide2_sft_anchor_h100:
+    description: Prompted SFT anchor with a wider two-state-action retail curriculum.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-prompted-wide2
+      data_dir: .art/curriculum_data/retail_bridge_state2_strict_prompted
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-prompted-wide2
+      build_bridge: true
+      bridge_max_state_actions: 2
+      bridge_max_tool_calls: 12
+      bridge_max_turns: 48
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
+      include_teacher_sft: true
+      teacher_sft_limit: 512
+      eval_limit: 25
+      sft_max_steps: 240
+      sft_chunk_size_batches: 12
+      sft_peak_lr: 0.00001
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      skip_rl: true
+      skip_compare: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_prompted_wide2_sparse_process_grpo_h100:
+    description: GRPO branch from the wider prompted SFT anchor with sparse process reward.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-prompted-wide2
+      data_dir: .art/curriculum_data/retail_bridge_state2_strict_prompted
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-prompted-wide2
+      build_bridge: true
+      bridge_max_state_actions: 2
+      bridge_max_tool_calls: 12
+      bridge_max_turns: 48
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
+      eval_limit: 25
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: grpo
+      rl_suffix: prompted-wide2-sparse-process-s24-g8-r8-lr5e7
+      reward_profile: tau_irc_sparse_process
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      rl_train_limit: 292
+      rl_steps: 24
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      rl_candidate_metric: data/step_retail_task_success_mean
+      rl_candidate_top_k: 5
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_prompted_wide2_sparse_process_gspo_h100:
+    description: GSPO branch from the wider prompted SFT anchor with sparse process reward.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-prompted-wide2
+      data_dir: .art/curriculum_data/retail_bridge_state2_strict_prompted
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-prompted-wide2
+      build_bridge: true
+      bridge_max_state_actions: 2
+      bridge_max_tool_calls: 12
+      bridge_max_turns: 48
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
+      eval_limit: 25
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: gspo
+      rl_suffix: prompted-wide2-sparse-process-s24-g8-r8-lr5e7
+      reward_profile: tau_irc_sparse_process
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      rl_train_limit: 292
+      rl_steps: 24
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      rl_candidate_metric: data/step_retail_task_success_mean
+      rl_candidate_top_k: 5
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
   strict_resample_tauirc_h100:
     description: GRPO-only tau_irc reward hedge that reuses the strict SFT anchor and samples replacement scenarios.
     args:
@@ -590,6 +695,116 @@ profiles:
       rl_rollouts_per_scenario: 8
       rl_max_sampling_rounds: 1
       rl_learning_rate: 0.000001
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  appendix_tau_synthetic_sft_h100:
+    description: Appendix profile that prepares the larger fuvty tau-bench-synthetic retail data and trains a wider SFT anchor.
+    args:
+      run_slug: lfm25-8b-a1b-tau-synthetic-retail
+      source_dataset_kind: tau_synthetic_retail
+      source_dir: .art/full_data/tau_synthetic_retail
+      data_dir: .art/curriculum_data/tau_synthetic_retail_bridge
+      sft_file: .art/curriculum_data/tau_synthetic_retail_bridge/sft_next_action_tau_synthetic.jsonl
+      data_artifact_name: retail-course-data-tau-synthetic-appendix
+      build_bridge: true
+      bridge_max_state_actions: 3
+      bridge_max_tool_calls: 20
+      bridge_max_turns: 72
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
+      eval_limit: 40
+      sft_max_steps: 512
+      sft_chunk_size_batches: 16
+      sft_peak_lr: 0.00001
+      reward_profile: tau_irc_success_gated
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      skip_rl: true
+      skip_compare: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  appendix_tau_synthetic_grpo_h100:
+    description: Long GRPO appendix branch from the tau-synthetic SFT anchor; intended for offline evidence, not live delivery.
+    args:
+      run_slug: lfm25-8b-a1b-tau-synthetic-retail
+      source_dataset_kind: tau_synthetic_retail
+      source_dir: .art/full_data/tau_synthetic_retail
+      data_dir: .art/curriculum_data/tau_synthetic_retail_bridge
+      sft_file: .art/curriculum_data/tau_synthetic_retail_bridge/sft_next_action_tau_synthetic.jsonl
+      data_artifact_name: retail-course-data-tau-synthetic-appendix
+      build_bridge: false
+      bridge_max_state_actions: 3
+      bridge_max_tool_calls: 20
+      bridge_max_turns: 72
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
+      eval_limit: 40
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: grpo
+      rl_suffix: tau-synthetic-s24-g8-r8-lr5e7
+      reward_profile: tau_irc_success_gated
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      rl_train_limit: 425
+      rl_steps: 24
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      rl_candidate_metric: data/step_retail_task_success_mean
+      rl_candidate_top_k: 5
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  appendix_tau_synthetic_gspo_h100:
+    description: Long GSPO appendix branch from the tau-synthetic SFT anchor; intended for offline evidence, not live delivery.
+    args:
+      run_slug: lfm25-8b-a1b-tau-synthetic-retail
+      source_dataset_kind: tau_synthetic_retail
+      source_dir: .art/full_data/tau_synthetic_retail
+      data_dir: .art/curriculum_data/tau_synthetic_retail_bridge
+      sft_file: .art/curriculum_data/tau_synthetic_retail_bridge/sft_next_action_tau_synthetic.jsonl
+      data_artifact_name: retail-course-data-tau-synthetic-appendix
+      build_bridge: false
+      bridge_max_state_actions: 3
+      bridge_max_tool_calls: 20
+      bridge_max_turns: 72
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
+      eval_limit: 40
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: gspo
+      rl_suffix: tau-synthetic-s24-g8-r8-lr5e7
+      reward_profile: tau_irc_success_gated
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      rl_train_limit: 425
+      rl_steps: 24
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      rl_candidate_metric: data/step_retail_task_success_mean
+      rl_candidate_top_k: 5
+      eval_rl_candidates: true
       max_completion_tokens: 768
       art_seq_length: 16384
       vllm_gpu_memory_utilization: 0.7

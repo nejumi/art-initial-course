@@ -265,7 +265,7 @@ SFT設計で巨人の肩に乗るポイント:
 学習題材:
 
 - メイン題材は「Retail Customer Support Agent」
-- オープンデータ: `lefft/tau-dev-task-retail-v1` をSFT/形式理解に使い、tau-bench/tau2-bench retailの考え方を評価/RL rollout設計に使う。SFT warm start強化では `amityco/tau-bench-retail-train-next-action-all-step-score-v0.2` を使い、Advancedでは `inclusionAI/AReaL-tau2-data` をnext-action SFT/RLデータ設計の比較対象にする。
+- オープンデータ: `lefft/tau-dev-task-retail-v1` をSFT/形式理解に使い、tau-bench/tau2-bench retailの考え方を評価/RL rollout設計に使う。SFT warm start強化では `amityco/tau-bench-retail-train-next-action-all-step-score-v0.2` を使い、Advancedでは `inclusionAI/AReaL-tau2-data` や `fuvty/tau-bench-synthetic` をnext-action SFT/RLデータ設計の比較対象にする。
 - 入力: 顧客からの注文キャンセル、返品、交換、住所変更、注文状況確認、商品情報確認などの問い合わせ。
 - 出力: 顧客への自然文応答と、必要なOpenAI tool-calling形式の関数呼び出し。
 - ツール例: `get_user_details`, `get_order_details`, `modify_pending_order_address`, `cancel_pending_order`, `return_delivered_order`, `exchange_delivered_order`, `calculate`。
@@ -321,6 +321,7 @@ Agentが行うこと:
 この題材がよい理由:
 
 - 実際に入手できるオープンデータがある。`lefft/tau-dev-task-retail-v1` はOpenAI tool-calling wire formatで915件、train/validation/test split付き。
+- 大規模appendixでは `fuvty/tau-bench-synthetic` を使い、短時間ワークショップでは不足しやすいSFT/rollout coverageを増やす。
 - Retailはsingle-controlなので、Telecomのようなuser-side state mutation/user simulator設計を初回ハンズオンに持ち込まずに済む。
 - tool call、multi-turn、policy compliance、verifiable reward、Weave Evals、W&B Models/Registryの意味が自然に出る。
 - SFTでtool-call形式と次アクション分布を整え、RLでstate-changing outcomeとcommunicationを報酬・評価に接続する流れが説明しやすい。

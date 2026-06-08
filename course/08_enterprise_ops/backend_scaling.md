@@ -188,6 +188,31 @@ Keep the course generic:
 - keep Slurm, Kubernetes, Ray, or cloud-specific launchers in optional deployment
   notes, not the core labs.
 
+## Where The Time Goes In The Retail Runbook
+
+In the current single-GPU LocalBackend runbook, rollout collection is usually the
+bottleneck. Training a LoRA update is often measured in tens of seconds, while
+collecting multi-turn tool-call rollouts can take several minutes per update
+because vLLM is serving many agent turns serially on one GPU.
+
+The practical scaling ladder is:
+
+1. **Parallel branches/evals:** run GRPO, GSPO, RULER, or checkpoint eval profiles
+   on separate GPUs. This is what
+   `course/09_runbooks/sunk_h100_parallel_profiles.sbatch` does.
+2. **Dedicated LocalBackend:** reserve separate trainer and inference GPUs so
+   rollout and train resources do not contend for the same device.
+3. **PipelineTrainer / actor-learner design:** collect rollouts from multiple
+   inference actors, train on the learner, then publish the next checkpoint to
+   actors.
+4. **MegatronBackend:** scale the trainer when the model or packed sequences no
+   longer fit the single-GPU trainer path.
+
+The provided 8xH100 Slurm wrapper is deliberately conservative: it launches
+multiple one-GPU ART profiles inside a single allocation. That gives immediate
+wall-clock savings for branch sweeps and validation without claiming that the
+current local GRPO loop performs a distributed policy update.
+
 ## Suggested Slide Framing
 
 - Slide: "One ART loop, three execution modes"

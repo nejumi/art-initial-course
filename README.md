@@ -9,6 +9,7 @@ The main task is a Retail Customer Support Agent based on open retail tool-calli
 - `lefft/tau-dev-task-retail-v1` for SFT and workflow validation
 - tau-bench / tau2-bench retail concepts for rollout, reward, and eval design
 - optional tau2-style next-action SFT data from `amityco/...`, `inclusionAI/AReaL-tau2-data`, and successful public tau2 retail traces
+- optional large-scale appendix data from `fuvty/tau-bench-synthetic`
 
 The code is structured so the early labs can be inspected without a GPU. Local ART training labs require a CUDA-capable GPU and `openpipe-art[backend]`.
 
@@ -22,6 +23,7 @@ The course uses public datasets so the labs can run end to end without private t
 | [`amityco/tau-bench-retail-train-next-action-all-step-score-v0.2`](https://huggingface.co/datasets/amityco/tau-bench-retail-train-next-action-all-step-score-v0.2) | Optional teacher next-action SFT | Step-level retail tool-call rows with candidate scores | Converted by `make_teacher_next_action_sft_jsonl.py`; filtered to the SFT task fold before mixing |
 | [`inclusionAI/AReaL-tau2-data`](https://huggingface.co/datasets/inclusionAI/AReaL-tau2-data) | Advanced next-action SFT option | Mirrors recent tau2-style SFT + verifiable-reward RL workflows | Converted by `make_areal_retail_sft_jsonl.py`; strips thinking fields and normalizes tool calls |
 | [`KermitCO/qwen3.5-9B-tau2bench-retail-traces`](https://huggingface.co/datasets/KermitCO/qwen3.5-9B-tau2bench-retail-traces) | Success-trace SFT warm start | Retail-only tau2 traces with canonical reward and judge-quality fields | Converted by `make_success_trace_retail_sft_jsonl.py`; defaults to non-memory, blind-strict, reward-1 traces |
+| [`fuvty/tau-bench-synthetic`](https://huggingface.co/datasets/fuvty/tau-bench-synthetic) | Large-scale appendix SFT/RL source | Larger synthetic tau-bench retail trajectories and next-action rows | Prepared by `prepare_tau_synthetic_retail.py`; intended for offline evidence runs rather than the first live workshop path |
 | [`Jarrodbarnes/Qwen3-4B-tau2-grpo-v1`](https://huggingface.co/Jarrodbarnes/Qwen3-4B-tau2-grpo-v1) | Prior-art reference | Public model card documents SFT -> RFT -> GRPO, turn-level shaping, and tau2 eval settings | Not used as course weights by default; informs the training/eval recipe |
 
 Full-dialog SFT is easy to explain, but it can over-supervise long dialogue style and final responses. Next-action SFT is the stronger path when we want to align with modern agent training recipes and avoid training on every prior assistant action repeatedly.
@@ -186,6 +188,23 @@ sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
 
 To include RULER in an advanced run, set `overrides: {rl_algos: "grpo,gspo,ruler"}` or create an instructor profile in `base_config.yaml`. RULER uses an external judge model, so plan for the extra judge calls.
 
+Large-scale appendix path:
+
+```bash
+# First build the larger synthetic retail source and SFT anchor.
+sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  appendix_tau_synthetic_sft_h100
+
+# After the SFT anchor exists, run GRPO and GSPO branches in parallel on one 8xH100 node.
+sbatch course/09_runbooks/sunk_h100_parallel_profiles.sbatch \
+  appendix_tau_synthetic_grpo_h100 \
+  appendix_tau_synthetic_gspo_h100
+```
+
+This parallel wrapper assigns one GPU to each profile. It speeds up branch sweeps and checkpoint evaluations, but it does not turn the current single-GPU LocalBackend loop into one distributed GRPO update. For true actor/learner rollout distribution, see the scaling appendix.
+
 Advanced SFT data option:
 
 ```bash
@@ -218,6 +237,8 @@ python course/03_sft_warmup/mix_sft_jsonl.py \
 ```
 
 The default course path uses compact TAU retail trajectories. The bridge curriculum keeps short successful trajectories with exactly one state-changing action and writes disjoint SFT, RL rollout, validation, and test buckets. This keeps GRPO validation independent while preserving a short, understandable task. The teacher, AReaL, and success-trace converters are provided for stronger warm starts and advanced experiments that want to align SFT data construction with recent tau2-style multi-turn tool-agent work.
+
+The appendix path uses `fuvty/tau-bench-synthetic` to increase SFT and rollout coverage. It is useful for offline GRPO/GSPO evidence runs when a short live workshop cannot run enough RL updates to demonstrate convergence.
 
 Next-action SFT should be trained with last-assistant masking:
 

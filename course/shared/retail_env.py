@@ -8,6 +8,7 @@ from .schemas import EnvStep, Message, RetailScenario
 
 
 STATE_CHANGING_TOOL_NAMES = {
+    "cancel_order",
     "cancel_pending_order",
     "exchange_delivered_order_items",
     "modify_pending_order_address",

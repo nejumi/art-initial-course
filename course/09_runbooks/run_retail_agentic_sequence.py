@@ -287,26 +287,68 @@ def build_or_refresh_data(args: argparse.Namespace, env: dict[str, str]) -> None
             build_augmented_sft(args, env)
         return
     if not (args.source_dir / "train.jsonl").exists():
+        if args.source_dataset_kind == "tau_synthetic_retail":
+            run_command(
+                "prepare tau synthetic retail appendix data",
+                [
+                    sys.executable,
+                    "-B",
+                    "course/03_sft_warmup/prepare_tau_synthetic_retail.py",
+                    "--output-dir",
+                    path_arg(args.source_dir),
+                    "--sft-output",
+                    path_arg(args.data_dir / "sft_next_action_tau_synthetic.jsonl"),
+                    "--holdout-modulo",
+                    str(args.bridge_holdout_mod),
+                    "--sft-remainder",
+                    str(args.bridge_sft_remainder),
+                ],
+                env=env,
+                dry_run=args.dry_run,
+            )
+        else:
+            run_command(
+                "download retail data",
+                [
+                    sys.executable,
+                    "-B",
+                    "course/03_sft_warmup/download_tau_retail.py",
+                    "--output-dir",
+                    path_arg(args.source_dir),
+                ],
+                env=env,
+                dry_run=args.dry_run,
+            )
+            run_command(
+                "make full-trajectory SFT data",
+                [
+                    sys.executable,
+                    "-B",
+                    "course/03_sft_warmup/make_sft_jsonl.py",
+                    "--data-dir",
+                    path_arg(args.source_dir),
+                ],
+                env=env,
+                dry_run=args.dry_run,
+            )
+    elif (
+        args.source_dataset_kind == "tau_synthetic_retail"
+        and not (args.data_dir / "sft_next_action_tau_synthetic.jsonl").exists()
+    ):
         run_command(
-            "download retail data",
+            "refresh tau synthetic retail SFT appendix data",
             [
                 sys.executable,
                 "-B",
-                "course/03_sft_warmup/download_tau_retail.py",
+                "course/03_sft_warmup/prepare_tau_synthetic_retail.py",
                 "--output-dir",
                 path_arg(args.source_dir),
-            ],
-            env=env,
-            dry_run=args.dry_run,
-        )
-        run_command(
-            "make full-trajectory SFT data",
-            [
-                sys.executable,
-                "-B",
-                "course/03_sft_warmup/make_sft_jsonl.py",
-                "--data-dir",
-                path_arg(args.source_dir),
+                "--sft-output",
+                path_arg(args.data_dir / "sft_next_action_tau_synthetic.jsonl"),
+                "--holdout-modulo",
+                str(args.bridge_holdout_mod),
+                "--sft-remainder",
+                str(args.bridge_sft_remainder),
             ],
             env=env,
             dry_run=args.dry_run,
@@ -980,6 +1022,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--art-path", type=Path, default=Path(cfg.art_path) / "course_runs")
     parser.add_argument("--data-dir", type=Path, default=PROJECT_ROOT / "data" / "retail_bridge_state1")
     parser.add_argument("--source-dir", type=Path, default=PROJECT_ROOT / "data" / "retail")
+    parser.add_argument(
+        "--source-dataset-kind",
+        choices=["tau_dev_retail", "tau_synthetic_retail"],
+        default="tau_dev_retail",
+    )
     parser.add_argument("--report-dir", type=Path, default=None)
     parser.add_argument("--data-artifact-name", default="retail-course-data-bridge-state1")
     parser.add_argument("--build-bridge", action="store_true")

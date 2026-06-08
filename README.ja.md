@@ -11,6 +11,7 @@
 
 - SFTとワークフロー確認: `lefft/tau-dev-task-retail-v1`
 - 追加SFT warm start: `amityco/tau-bench-retail-train-next-action-all-step-score-v0.2`、`inclusionAI/AReaL-tau2-data`、`KermitCO/qwen3.5-9B-tau2bench-retail-traces`
+- 大規模appendix用: `fuvty/tau-bench-synthetic`
 - RL rollout / reward / eval設計: tau-bench / tau2-bench retailの考え方を簡略化して利用
 
 `success mix`、`teacher mix`、`bridge-only` は実験条件名です。主な評価指標は `retail_task_success`、`reference_tool_sequence_exact_match`、`reward` です。詳しい定義は英語版READMEの "Task and Metric Terminology" を参照してください。
@@ -60,6 +61,8 @@ sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
   course/09_runbooks/base_config.yaml \
   validated_h100
 ```
+
+大規模appendixでは、`appendix_tau_synthetic_sft_h100` で大きめのsynthetic retail SFT anchorを作り、その後 `sunk_h100_parallel_profiles.sbatch` で `appendix_tau_synthetic_grpo_h100` と `appendix_tau_synthetic_gspo_h100` を並列実行できます。これは複数profileをGPUごとに並列化する導線であり、現行の単一GRPO更新そのものを8GPU分散するものではありません。
 
 ## 結果の確認
 

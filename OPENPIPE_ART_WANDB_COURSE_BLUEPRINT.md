@@ -11,7 +11,7 @@
 1. 既存のPythonエージェントをARTの `Scenario -> rollout -> Trajectory -> TrajectoryGroup -> reward -> backend.train` に接続する。
 2. W&B Modelsで学習メトリクス、データ、LoRAチェックポイント、Registryの昇格履歴を追えるようにする。
 3. Weaveでrollout、tool call、RULER judge、評価失敗の実例をトレースとして辿れるようにする。
-4. SFTで形式・ツール利用・初期成功率を底上げし、GRPO系RLでタスク性能を改善する。
+4. SFTで形式・ツール利用をwarm startし、GRPO/GSPO系RLでrolloutから学ぶ流れを設計・観測・検証する。
 5. RULERで報酬設計の初速を上げ、必要に応じて手作り報酬と併用する。
 6. GSPO、rollout logprobs、KL penalty、importance sampling、checkpoint forking/deletionなどを、単なる引数一覧ではなく「いつ使うか」で理解する。`precalculate_logprobs` はARTバージョンやbackendで利用可否が変わるadvanced topicとして扱う。
 7. Dedicated Cloud / Self-Managed / Customer Managed環境におけるセキュリティ、データ所在、Registry運用、サービスアカウント運用まで含めて設計できる。
@@ -75,7 +75,7 @@ API互換性チェック:
 
 ### 3.1 短時間デリバリー版
 
-コースのゴールは、W&B Models / Weave / ARTでagentic SFT/RLをどう設計・観測・検証するかを理解し、短い実行で初期信号を確認し、評価ワークフローとして妥当な採用判断を行えるようにすること。構成はセッション時間、GPU、事前準備状況に合わせて調整する。
+コースのゴールは、W&B Models / Weave / ARTでagentic SFT/RLをどう設計・観測・検証するかを理解し、短い実行で学習ループと観測ポイントを確認し、評価ワークフローとして妥当な比較判断を行えるようにすること。構成はセッション時間、GPU、事前準備状況に合わせて調整する。
 
 ワークショップ設定の基本:
 
@@ -138,7 +138,7 @@ overrides: {}
 Key takeaways:
 
 - 短時間runでは、操作手順、W&B/Weave連携、初期学習信号の読み方を体験する。
-- 性能改善は、checkpoint validation、W&B Artifact lineage、Weave traceが揃った評価で確認する。
+- checkpoint比較は、validation、W&B Artifact lineage、Weave traceが揃った評価で行う。
 - 長期RLは単調改善を仮定しない。`select_checkpoint_candidate.py` で中間checkpointを選び、fresh validation evalで採用する。
 - train rewardのbest rowは採用根拠にしない。checkpoint validationを通った結果だけを比較対象にする。
 
@@ -146,12 +146,12 @@ Key takeaways:
 
 - Baselineで、base modelの初期難易度、state action error、truncationを把握する。
 - SFT anchorで、tool-call形式、状態変更行動、最終応答がRLの出発点として安定しているかを見る。
-- GRPO selected checkpointで、SFT anchorと同じheld-out条件に対する改善、失敗理由、artifact lineage、Weave traceを確認する。
+- GRPO selected checkpointで、SFT anchorと同じheld-out条件に対する差分、失敗理由、artifact lineage、Weave traceを確認する。
 
 読み方:
 
-- SFTでtool-call形式、状態変更行動、初期成功率を底上げする。
-- GRPOで `bad_state_action` / `missing_state_action` を下げ、`state_action_sequence_match` と `retail_task_success` を改善する。
+- SFTでtool-call形式、状態変更行動、次アクション分布を整える。
+- GRPOで `bad_state_action` / `missing_state_action`、`state_action_sequence_match`、`retail_task_success` を観測し、rolloutからの学習信号を確認する。
 - 長いRLは必ずしも単調改善しない。W&Bの学習曲線で候補を選び、held-out validationとWeave traceで採用checkpointを確認する。
 
 トラック:
@@ -162,7 +162,7 @@ Key takeaways:
 
 モデル選択:
 
-- `model_profile: tiny`: `Qwen/Qwen3-0.6B`。小さなGPUやCPU寄り環境でのsetup/SFT/RL smoke test用。性能改善の説得力ではなく、教材の操作手順を低コストに確認するためのプロファイル。
+- `model_profile: tiny`: `Qwen/Qwen3-0.6B`。小さなGPUやCPU寄り環境でのsetup/SFT/RL smoke test用。教材の操作手順を低コストに確認するためのプロファイル。
 - `model_profile: standard`: `LiquidAI/LFM2.5-8B-A1B`。H100を想定したメインハンズオンの基準モデル。next-action SFTとtau-style RLを扱う標準プロファイル。
 - `model_profile: openpipe`: `OpenPipe/Qwen3-14B-Instruct`。OpenPipe/Qwen系の互換性比較やmanaged trainingの話題に使う。
 - `model_profile: serverless`: `OpenPipe/Qwen3-14B-Instruct`。W&B Serverless RLの軽い比較デモ用。
@@ -174,7 +174,7 @@ SFT/RL設計の実務的学び:
 - Baseline LFM2.5-8B-A1Bはretail tool callingをある程度こなせるため、初期モデルが完全に壊れているtoy exampleにならない。
 - SFTは有効だが、full trajectoryをそのまま全assistant turnで模倣させるだけでは、重要な意思決定が「それっぽい会話の再現」に埋もれやすい。
 - Agentic SFTでは、状態を変えるtool callや最終応答などの意思決定点を `next-action` 形式で切り出し、直前contextから「次に何をすべきか」を学ばせる。
-- SFTはagentic RLの代替ではなく、tool-call dialect、policy adherence、初期成功率、rolloutの安定性を整えるwarm startとして位置づける。
+- SFTはagentic RLの代替ではなく、tool-call dialect、policy adherence、初期方策、rolloutの安定性を整えるwarm startとして位置づける。
 - RLの報酬設計は、final successだけの疎な報酬では信号が弱く、dense rewardを足しすぎると本来の成功方向とずれることがある。verifiable outcome、state-changing action correctness、communication quality、安全ペナルティを分けて設計する。
 - 報酬設計は一度で決めない。既存研究のレシピを初期仮説にし、reward profile、penalty weight、learning rate、checkpoint selection metricを複数水準で比較する。
 
@@ -193,7 +193,7 @@ Agentic RLの報酬設計を分解して考える:
 
 | 教材で扱う観点 | 関連する既存知見 |
 | --- | --- |
-| SFT -> RLの段階設計 | InstructGPT/RLHFはdemonstration SFT、preference/reward model、RLという段階設計を採用する。Agentic RLでもSFTをwarm startとして使い、RLで実際のrolloutから改善する構図は近い。 |
+| SFT -> RLの段階設計 | InstructGPT/RLHFはdemonstration SFT、preference/reward model、RLという段階設計を採用する。Agentic RLでもSFTをwarm startとして使い、RLで実際のrolloutに基づいて方策を更新する構図は近い。 |
 | Verifiable reward | DeepSeekMath/DeepSeek-R1系のGRPO/RLVRでは、正誤判定やformat rewardなど検証可能な報酬が中核になる。tool-using agentではDB state、tool action、policy complianceがこれに相当する。 |
 | Process / shaping reward | reward shapingは古典的RLから知られる設計課題で、途中状態への報酬は学習を助ける一方、最適化対象をずらす危険がある。process supervisionは最終結果だけでなく中間ステップを評価する流れと対応する。 |
 | Reward hackingへの警戒 | 報酬を増やしても本来の目的を満たさないspecification gamingは、RL安全性の古典的問題。agentでは「もっともらしい応答」「余計なtool call」「状態を壊す近道」を検出する必要がある。 |
@@ -227,7 +227,7 @@ RULER / LLM-as-judgeの使いどころ:
 | Position bias | trajectoryの提示順によってscoreが揺れることがある | trajectory順序をshuffleし、必要なら複数judge passを比較する |
 | Long-context confusion | trajectoryが長いと、trajectory IDと内容の対応や失敗箇所の記憶が混ざる | 短いcurriculum、要約、failure trace確認、max turns管理を使う |
 | Rubric sensitivity | rubricの曖昧さで、何を良いtrajectoryとみなすかが変わる | rubricをtask success、tool use、policy、communicationに分解する |
-| Score calibration | 0-1 scoreの絶対値はjudgeやpromptに依存する | GRPOのgroup-relative signalとして使い、held-out evalで採用判断する |
+| Score calibration | 0-1 scoreの絶対値はjudgeやpromptに依存する | GRPOのgroup-relative signalとして使い、held-out evalでcheckpoint比較する |
 
 Key message:
 
@@ -248,19 +248,19 @@ Reference anchors:
 
 - RULERは、正解DB stateのような厳密検証を置き換えるものではなく、会話品質、ポリシー説明、簡潔さ、安全な顧客対応など、verifierだけでは表現しにくい軸を補助するために使う。
 - Retail taskでは、`verifier reward` を主軸にし、RULERを低めの重みでhybrid rewardに混ぜる水準と、RULERを強める水準を比較する。
-- 短いbridge curriculumで `next-action SFT -> GRPO branch / GSPO branch` を独立比較し、`tau_irc` 系報酬、state-changing action correctness、communication success、Retail Task Successを横持ち表で検証する。
-- SFT checkpointはlossだけでは採用しない。baseline/SFT/RLを同じholdoutでWeave evalし、SFTが少なくともtool-call形式とstate-changing action指標を改善していることを確認してからRL parentにする。
+- 短いbridge curriculumで `next-action SFT -> GRPO branch / GSPO branch` を独立比較し、`tau_irc` 系報酬、state-changing action correctness、communication success、Retail Task Successを横持ち表で確認する。
+- SFT checkpointはlossだけでは判断しない。baseline/SFT/RLを同じholdoutでWeave evalし、tool-call形式、state-changing action、communicationの指標を見てRL parentとしての妥当性を確認する。
 - RLは「エラーなく回る」では合格にしない。group内reward variance、winner-minus-loser差分、zero-variance group filter、state-action attempt/reached rate、bad/missing state-action rateをW&Bに出し、GRPO/GSPOが実際に学習信号を受けていることを確認する。
 - 長いRL runは単調改善を仮定しない。`train_metrics_<algo>_<suffix>.jsonl` と `select_checkpoint_candidate.py` で候補stepを選び、中間checkpointをheld-out eval、W&B Artifact lineage、Weave traceで確認してから採用する。
-- 採用判断はtrain rewardの最大値ではなく、held-out evalとacceptance gateを通ったcheckpointだけで行う。
+- checkpoint判断はtrain rewardの最大値だけではなく、held-out evalとacceptance gateを通った候補で行う。
 
 SFT設計で巨人の肩に乗るポイント:
 
-- AReaL/SEA系の前例に合わせ、`SFT -> verifier-based GRPO/GSPO` を基本形にする。SFTはagentic RLの代替ではなく、tool-call dialect、policy、初期成功率を整えるためのpolicy initializationとして扱う。
+- AReaL/SEA系の前例に合わせ、`SFT -> verifier-based GRPO/GSPO` を基本形にする。SFTはagentic RLの代替ではなく、tool-call dialect、policy、初期方策を整えるためのpolicy initializationとして扱う。
 - CoVeの考え方に合わせ、ただの成功ログではなく、制約・検証器・canonical reward・judge qualityでcleanに確認できる軌跡を優先する。教材では `KermitCO/...retail-traces` の reward-1 / non-memory / blind-strict filter と、unknown tool除去がこの役割を担う。
 - TopoCurateの考え方に合わせ、SFTは「成功しているが多様で、必要なら回復行動も含む」軌跡を使い、RLは「まだ失敗分岐が残り、group-relative advantageが立つ」タスク集合を選ぶ。bridge curriculumは簡単にしすぎず、no-signal group diagnosticsで難易度を監視する。
 - 次アクションSFTを主軸にし、full-dialog SFTは教育用baselineに留める。長いfull-dialogをそのまま全assistant turnでmaskすると、前のassistant行動まで重複監督して、W&B上のloss改善と実際のagentic改善がズレやすい。
-- SFT採用条件はlossではなく、Weave eval上の `retail_task_success`, `state_action_sequence_match`, `bad_state_action`, `missing_state_action`, `reference_tool_sequence_exact_match`, tool-call F1/argument matchで判断する。
+- SFT checkpointはlossだけでなく、Weave eval上の `retail_task_success`, `state_action_sequence_match`, `bad_state_action`, `missing_state_action`, `reference_tool_sequence_exact_match`, tool-call F1/argument matchで確認する。
 
 学習題材:
 
@@ -323,7 +323,7 @@ Agentが行うこと:
 - 実際に入手できるオープンデータがある。`lefft/tau-dev-task-retail-v1` はOpenAI tool-calling wire formatで915件、train/validation/test split付き。
 - Retailはsingle-controlなので、Telecomのようなuser-side state mutation/user simulator設計を初回ハンズオンに持ち込まずに済む。
 - tool call、multi-turn、policy compliance、verifiable reward、Weave Evals、W&B Models/Registryの意味が自然に出る。
-- SFTでtool-call形式と次アクション分布を覚え、RLでstate-changing outcomeとcommunicationを改善する流れが説明しやすい。
+- SFTでtool-call形式と次アクション分布を整え、RLでstate-changing outcomeとcommunicationを報酬・評価に接続する流れが説明しやすい。
 - Telecomは発展編として「production agentでは人間がtrajectoryに入るが、RLではuser simulator/environmentで近似する」話に回す。
 
 ## 4. 受講者ペルソナ
@@ -870,8 +870,8 @@ Slide 19: Why SFT before RL
 
 - format contract
 - tool call shape
-- initial success rate
-- reduced zero-reward phase
+- initial policy shape
+- fewer zero-signal rollout groups as an intended diagnostic
 
 Slide 20: JSONL format
 
@@ -994,9 +994,9 @@ Slide 33: Governance
 
 Slide 34: Capstone task
 
-- improve retail holdout task success by at least N% over the prompted baseline
+- run baseline/SFT/RL checkpoint comparison on the same held-out retail task set
 - produce W&B report with run, artifact, Weave eval, and trace examples
-- promote best checkpoint to Registry with eval evidence
+- promote a selected checkpoint to Registry with eval evidence
 
 Slide 35: Review rubric
 
@@ -1072,7 +1072,7 @@ course/
 - `course/00_setup/wandb_weave_smoke.py` でW&B RunとWeave Traceの連携を確認
 - `course/00_setup/art_api_smoke.py` でART API互換性を確認
 
-期待成果:
+確認するもの:
 
 - W&B Runが1つ作られる
 - Weave Traceが1つ作られる
@@ -1094,7 +1094,7 @@ course/
 - `dense`, `tau_sparse`, `tau_irc` のreward profileを切り替えて、reference-path rewardとRetail Task Successの違いを見る
 - `await model.log(groups, split="val")`
 
-期待成果:
+確認するもの:
 
 - W&Bに `val/reward`, `val/retail_task_success`, `val/policy_violation`, `val/invalid_tool_call` が出る
 - Weaveにrollout/tool/reward traceが出る
@@ -1114,7 +1114,7 @@ course/
 - `weave.Evaluation(dataset=dataset, scorers=[...])` を実行
 - aggregate結果をW&B run summary/tableにも戻す
 
-期待成果:
+確認するもの:
 
 - Weave Evaluation UIでbaselineの失敗例を開ける
 - W&B runに `eval/retail_task_success`, `eval/policy_violation`, `eval/avg_turns` が出る
@@ -1143,9 +1143,9 @@ course/
 - next-action rowsでは過去assistant turnsはcontextであり、loss対象は最後のassistant actionだけにする。
 - full-dialog SFTはtool schema/wire formatの説明には便利だが、RL parentとしては過去turnを過剰に模倣しやすい。
 
-期待成果:
+確認するもの:
 
-- baselineよりJSON validityが上がる
+- SFT前後のJSON validity / tool-call validityを同じWeave scorerで比較できる
 - Registryに `sft-warmup-candidate` として任意登録できる
 
 ### Lab 04 - GRPO-style Local RL
@@ -1256,7 +1256,7 @@ Weave:
 - Weave traceに `wandb-artifact:///<entity>/<project>/<artifact>:<version>` をattributeとして付ける
 - `weave.Model` wrapperでartifact + prompt config + inference adapterをversioning
 
-期待成果:
+確認するもの:
 
 - W&B Registry collectionにモデル候補が見える
 - artifact lineageがrunとつながる

@@ -30,6 +30,7 @@ REWARD_PROFILES = (
     "tau_irc_guarded",
     "tau_irc_success_gated",
     "tau_irc_sparse_process",
+    "tau_irc_factorized",
 )
 TAU_STYLE_REWARD_PROFILES = {
     "tau_sparse",
@@ -39,6 +40,7 @@ TAU_STYLE_REWARD_PROFILES = {
     "tau_irc_guarded",
     "tau_irc_success_gated",
     "tau_irc_sparse_process",
+    "tau_irc_factorized",
 }
 
 
@@ -382,6 +384,62 @@ def score_messages(
             reward = reward_components["reward_component/penalty_truncation"]
         else:
             reward = 0.0
+    elif profile == "tau_irc_factorized":
+        correct_state_action = (
+            state_action_sequence == 1.0
+            and state_action_args == 1.0
+            and missing_state_actions == 0
+            and bad_state_actions == 0
+            and invalid_state_mutations == 0
+            and unknown_tool_calls == 0
+            and invalid_tool_calls == 0
+        )
+        safe_communication = (
+            communication_success == 1.0
+            and has_final_response == 1.0
+            and not truncated_by_max_turn
+        )
+        unsafe_state_action = invalid_state_mutations > 0 or bad_state_actions > 0
+        unknown_tool = unknown_tool_calls > 0
+        missing_required_state_action = missing_state_actions > 0
+        state_action_bridge = 0.30 * float(correct_state_action and outcome_success == 0.0)
+        communication_bridge = 0.08 * float(safe_communication and outcome_success == 0.0)
+        # Keep missing-action pressure small so a communication-only trajectory
+        # still has a weak positive signal, but never enough to beat a correct
+        # state-changing action or a successful trajectory.
+        missing_penalty = 0.03 * float(missing_required_state_action and not correct_state_action)
+        truncation_penalty = 0.30 * float(truncated_by_max_turn)
+        reward_components = {
+            "reward_component/outcome": 1.0 * outcome_success,
+            "reward_component/state_action_factor": state_action_bridge,
+            "reward_component/communication_factor": communication_bridge,
+            "reward_component/penalty_invalid_state": -min(1.0, invalid_state_mutations * 1.0),
+            "reward_component/penalty_bad_state": -min(1.0, bad_state_actions * 1.0),
+            "reward_component/penalty_unknown_tool": -min(0.8, unknown_tool_calls * 0.8),
+            "reward_component/penalty_missing_state": -missing_penalty,
+            "reward_component/penalty_truncation": -truncation_penalty,
+            "reward_component/penalty_turns": -turn_penalty,
+        }
+        if outcome_success == 1.0:
+            reward = 1.0
+        elif unsafe_state_action or unknown_tool:
+            reward = (
+                state_action_bridge
+                + communication_bridge
+                + reward_components["reward_component/penalty_invalid_state"]
+                + reward_components["reward_component/penalty_bad_state"]
+                + reward_components["reward_component/penalty_unknown_tool"]
+                + reward_components["reward_component/penalty_truncation"]
+                + reward_components["reward_component/penalty_turns"]
+            )
+        else:
+            reward = (
+                state_action_bridge
+                + communication_bridge
+                - missing_penalty
+                - truncation_penalty
+                - turn_penalty
+            )
     elif profile in {"tau_irc", "tau_irc_outcome", "tau_irc_balanced", "tau_irc_guarded"}:
         # Tau-style calibrated shaping: reward the final verifiable outcome,
         # give soft credit only to state-changing actions, and keep read-only

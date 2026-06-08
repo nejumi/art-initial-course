@@ -825,6 +825,40 @@ class RetailRewardInvariantTests(unittest.TestCase):
         self.assertLess(rough.reward, 1.0)
         self.assertGreater(rough.reward, 0.8)
 
+    def test_factorized_reward_keeps_small_signal_for_one_success_factor(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+        communication_only = [
+            {"role": "system", "content": scenario.system_message},
+            {"role": "user", "content": scenario.user_message},
+            {"role": "assistant", "content": scenario.expected_final_text},
+        ]
+        state_action_only = scenario.reference_messages[:-1]
+
+        communication = score_messages(communication_only, scenario, reward_profile="tau_irc_factorized")
+        state_action = score_messages(state_action_only, scenario, reward_profile="tau_irc_factorized")
+        complete = score_messages(scenario.reference_messages, scenario, reward_profile="tau_irc_factorized")
+
+        self.assertEqual(communication.metrics["outcome_success"], 0.0)
+        self.assertEqual(communication.metrics["reward_component/communication_factor"], 0.08)
+        self.assertGreater(communication.reward, 0.0)
+        self.assertLess(communication.reward, state_action.reward)
+        self.assertEqual(state_action.metrics["reward_component/state_action_factor"], 0.30)
+        self.assertEqual(complete.reward, 1.0)
+
+    def test_factorized_reward_still_penalizes_bad_state_action(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+
+        wrong_state = score_messages(
+            scenario.reference_messages,
+            scenario,
+            invalid_state_mutations=1,
+            bad_state_actions=1,
+            reward_profile="tau_irc_factorized",
+        )
+
+        self.assertEqual(wrong_state.metrics["outcome_success"], 0.0)
+        self.assertLessEqual(wrong_state.reward, -1.0)
+
     def test_truncated_full_reference_is_not_tau_success(self) -> None:
         scenario = scenario_from_record(sample_records()[0], split="train", index=0)
 

@@ -1100,11 +1100,11 @@ profiles:
       skip_sft_eval: true
       skip_compare: true
       rl_algos: grpo
-      rl_suffix: tau-synthetic-factorized-s64-g8-r8-lr2e7
+      rl_suffix: tau-synthetic-factorized-s52-g8-r8-lr2e7
       reward_profile: tau_irc_factorized
       retail_tool_use_instruction: *retail_agentic_state_action_prompt
       rl_train_limit: 425
-      rl_steps: 64
+      rl_steps: 52
       rl_groups_per_step: 8
       rl_rollouts_per_scenario: 8
       rl_max_sampling_rounds: 2
@@ -1140,11 +1140,11 @@ profiles:
       skip_sft_eval: true
       skip_compare: true
       rl_algos: gspo
-      rl_suffix: tau-synthetic-factorized-s64-g8-r8-lr2e7
+      rl_suffix: tau-synthetic-factorized-s52-g8-r8-lr2e7
       reward_profile: tau_irc_factorized
       retail_tool_use_instruction: *retail_agentic_state_action_prompt
       rl_train_limit: 425
-      rl_steps: 64
+      rl_steps: 52
       rl_groups_per_step: 8
       rl_rollouts_per_scenario: 8
       rl_max_sampling_rounds: 2
@@ -1180,11 +1180,11 @@ profiles:
       skip_sft_eval: true
       skip_compare: true
       rl_algos: grpo
-      rl_suffix: tau-synthetic-success-gated-s64-g8-r8-lr2e7
+      rl_suffix: tau-synthetic-success-gated-s52-g8-r8-lr2e7
       reward_profile: tau_irc_success_gated
       retail_tool_use_instruction: *retail_agentic_state_action_prompt
       rl_train_limit: 425
-      rl_steps: 64
+      rl_steps: 52
       rl_groups_per_step: 8
       rl_rollouts_per_scenario: 8
       rl_max_sampling_rounds: 2

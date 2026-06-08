@@ -181,30 +181,36 @@ def configured_run_profile(config_path: Path) -> str | None:
     return run_profile
 
 
-def load_user_config_defaults(config_path: Path, base_config_path: Path) -> dict[str, object]:
+def load_user_config_defaults(
+    config_path: Path,
+    base_config_path: Path,
+    *,
+    include_model: bool = True,
+) -> dict[str, object]:
     data = load_yaml_mapping(config_path, required=False)
     defaults: dict[str, object] = {}
 
-    model_profile = data.get("model_profile")
-    if model_profile not in {None, "", "from_env"}:
-        if not isinstance(model_profile, str):
-            raise SystemExit("Run config 'model_profile' must be a string when set.")
-        defaults["model_profile"] = model_profile
-        if model_profile == "custom":
-            base_model = data.get("base_model")
-            if not base_model:
-                raise SystemExit("Run config uses model_profile: custom, so base_model must be set.")
-            defaults["base_model"] = str(base_model)
-        else:
-            try:
-                defaults["base_model"] = MODEL_PROFILES[model_profile]
-            except KeyError as exc:
-                allowed = ", ".join(["from_env", "custom", *sorted(MODEL_PROFILES)])
-                raise SystemExit(f"Unknown model_profile={model_profile!r}. Use one of: {allowed}.") from exc
+    if include_model:
+        model_profile = data.get("model_profile")
+        if model_profile not in {None, "", "from_env"}:
+            if not isinstance(model_profile, str):
+                raise SystemExit("Run config 'model_profile' must be a string when set.")
+            defaults["model_profile"] = model_profile
+            if model_profile == "custom":
+                base_model = data.get("base_model")
+                if not base_model:
+                    raise SystemExit("Run config uses model_profile: custom, so base_model must be set.")
+                defaults["base_model"] = str(base_model)
+            else:
+                try:
+                    defaults["base_model"] = MODEL_PROFILES[model_profile]
+                except KeyError as exc:
+                    allowed = ", ".join(["from_env", "custom", *sorted(MODEL_PROFILES)])
+                    raise SystemExit(f"Unknown model_profile={model_profile!r}. Use one of: {allowed}.") from exc
 
-    base_model = data.get("base_model")
-    if base_model not in {None, ""}:
-        defaults["base_model"] = str(base_model)
+        base_model = data.get("base_model")
+        if base_model not in {None, ""}:
+            defaults["base_model"] = str(base_model)
 
     gpu_memory_preset = data.get("gpu_memory_preset")
     if gpu_memory_preset not in {None, "", "standard"}:
@@ -234,6 +240,7 @@ def preparse_profile_args(argv: Sequence[str] | None = None) -> argparse.Namespa
     parser.add_argument("--base-config", type=Path, default=DEFAULT_BASE_CONFIG)
     parser.add_argument("--profile-config", type=Path, default=None, help=argparse.SUPPRESS)
     args, _ = parser.parse_known_args(argv)
+    args.run_profile_explicit = args.run_profile is not None
     args.config = args.config.resolve()
     args.base_config = (args.profile_config or args.base_config).resolve()
     args.run_profile = args.run_profile or configured_run_profile(args.config)
@@ -246,6 +253,7 @@ def base_env(args: argparse.Namespace) -> dict[str, str]:
         {
             "ART_BASE_MODEL": args.base_model,
             "ART_MODEL_PROFILE": args.model_profile,
+            "COURSE_IGNORE_RUN_CONFIG": "1",
             "ART_PATH": path_arg(args.art_path),
             "RETAIL_REWARD_PROFILE": args.reward_profile,
             "RETAIL_DATA_ARTIFACT_NAME": args.data_artifact_name,
@@ -1005,7 +1013,13 @@ def compare_results(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     profile_args = preparse_profile_args(argv)
     profile_defaults = load_run_profile_defaults(profile_args.run_profile, profile_args.base_config)
-    profile_defaults.update(load_user_config_defaults(profile_args.config, profile_args.base_config))
+    profile_defaults.update(
+        load_user_config_defaults(
+            profile_args.config,
+            profile_args.base_config,
+            include_model=not profile_args.run_profile_explicit,
+        )
+    )
     cfg = config_from_env()
     parser = argparse.ArgumentParser(
         description=(

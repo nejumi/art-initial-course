@@ -28,6 +28,8 @@ REWARD_PROFILES = (
     "tau_irc_outcome",
     "tau_irc_balanced",
     "tau_irc_guarded",
+    "tau_irc_success_gated",
+    "tau_irc_sparse_process",
 )
 TAU_STYLE_REWARD_PROFILES = {
     "tau_sparse",
@@ -35,6 +37,8 @@ TAU_STYLE_REWARD_PROFILES = {
     "tau_irc_outcome",
     "tau_irc_balanced",
     "tau_irc_guarded",
+    "tau_irc_success_gated",
+    "tau_irc_sparse_process",
 }
 
 
@@ -304,6 +308,80 @@ def score_messages(
     elif profile == "tau_sparse":
         reward_components = {"reward_component/outcome": outcome_success}
         reward = sum(reward_components.values())
+    elif profile == "tau_irc_sparse_process":
+        if outcome_success == 1.0:
+            read_only_penalty = min(
+                0.08,
+                read_only_reference_mismatches * 0.02 + bad_read_only_calls * 0.04,
+            )
+            communication_penalty = (
+                min(0.08, max(0.0, 0.50 - final_quality) * 0.16)
+                if scenario.expected_final_text.strip()
+                else 0.0
+            )
+            process_turn_penalty = min(0.05, turn_penalty)
+            process_penalty = min(0.20, read_only_penalty + communication_penalty + process_turn_penalty)
+        else:
+            read_only_penalty = 0.0
+            communication_penalty = 0.0
+            process_turn_penalty = 0.0
+            process_penalty = 0.0
+        reward_components = {
+            "reward_component/outcome": outcome_success,
+            "reward_component/communication": 0.0,
+            "reward_component/process_penalty": -process_penalty,
+            "reward_component/penalty_read_only": -read_only_penalty,
+            "reward_component/penalty_communication": -communication_penalty,
+            "reward_component/penalty_turns": -process_turn_penalty,
+        }
+        reward = outcome_success - process_penalty
+    elif profile == "tau_irc_success_gated":
+        correct_state_action = (
+            state_action_sequence == 1.0
+            and state_action_args == 1.0
+            and missing_state_actions == 0
+            and bad_state_actions == 0
+            and invalid_state_mutations == 0
+            and unknown_tool_calls == 0
+            and invalid_tool_calls == 0
+        )
+        unsafe_state_action = invalid_state_mutations > 0 or bad_state_actions > 0
+        unknown_tool = unknown_tool_calls > 0
+        missing_required_state_action = missing_state_actions > 0
+        partial_state_action = (
+            correct_state_action
+            and outcome_success == 0.0
+            and not truncated_by_max_turn
+        )
+        reward_components = {
+            "reward_component/outcome": 1.0 * outcome_success,
+            "reward_component/state_action_gate": 0.25 * float(partial_state_action),
+            "reward_component/communication": 0.0,
+            "reward_component/penalty_invalid_state": -min(1.0, invalid_state_mutations * 1.0),
+            "reward_component/penalty_bad_state": -min(1.0, bad_state_actions * 1.0),
+            "reward_component/penalty_unknown_tool": -min(0.8, unknown_tool_calls * 0.8),
+            "reward_component/penalty_missing_state": -0.35 * float(missing_required_state_action),
+            "reward_component/penalty_truncation": -0.50 * float(truncated_by_max_turn),
+            "reward_component/penalty_turns": -turn_penalty,
+        }
+        if outcome_success == 1.0:
+            reward = 1.0
+        elif unsafe_state_action or unknown_tool:
+            reward = (
+                reward_components["reward_component/penalty_invalid_state"]
+                + reward_components["reward_component/penalty_bad_state"]
+                + reward_components["reward_component/penalty_unknown_tool"]
+                + reward_components["reward_component/penalty_truncation"]
+                + reward_components["reward_component/penalty_turns"]
+            )
+        elif partial_state_action:
+            reward = reward_components["reward_component/state_action_gate"]
+        elif missing_required_state_action:
+            reward = reward_components["reward_component/penalty_missing_state"]
+        elif truncated_by_max_turn:
+            reward = reward_components["reward_component/penalty_truncation"]
+        else:
+            reward = 0.0
     elif profile in {"tau_irc", "tau_irc_outcome", "tau_irc_balanced", "tau_irc_guarded"}:
         # Tau-style calibrated shaping: reward the final verifiable outcome,
         # give soft credit only to state-changing actions, and keep read-only

@@ -70,8 +70,8 @@ profiles:
       sft_chunk_size_batches: 8
       sft_peak_lr: 0.00001
       rl_algos: grpo
-      rl_suffix: fast-balanced-s2-g4-r4
-      reward_profile: tau_irc_balanced
+      rl_suffix: fast-success-gated-s2-g4-r4
+      reward_profile: tau_irc_success_gated
       rl_train_limit: 12
       rl_steps: 2
       rl_groups_per_step: 4
@@ -101,8 +101,8 @@ profiles:
       sft_chunk_size_batches: 12
       sft_peak_lr: 0.00001
       rl_algos: grpo
-      rl_suffix: standard-balanced-s6-g4-r4
-      reward_profile: tau_irc_balanced
+      rl_suffix: standard-success-gated-s6-g4-r4
+      reward_profile: tau_irc_success_gated
       rl_train_limit: 24
       rl_steps: 6
       rl_groups_per_step: 4
@@ -135,8 +135,8 @@ profiles:
       sft_chunk_size_batches: 12
       sft_peak_lr: 0.00001
       rl_algos: grpo
-      rl_suffix: strict-disjoint-balanced-s18-g8-r8
-      reward_profile: tau_irc_balanced
+      rl_suffix: strict-disjoint-success-gated-s18-g8-r8
+      reward_profile: tau_irc_success_gated
       rl_train_limit: 144
       rl_steps: 18
       rl_groups_per_step: 8
@@ -170,8 +170,8 @@ profiles:
       sft_chunk_size_batches: 12
       sft_peak_lr: 0.00001
       rl_algos: grpo
-      rl_suffix: strict-validated-long-balanced-s18-g8-r8
-      reward_profile: tau_irc_balanced
+      rl_suffix: strict-validated-long-success-gated-s18-g8-r8
+      reward_profile: tau_irc_success_gated
       rl_train_limit: 144
       rl_steps: 18
       rl_groups_per_step: 8
@@ -207,8 +207,8 @@ profiles:
       sft_chunk_size_batches: 16
       sft_peak_lr: 0.00001
       rl_algos: grpo
-      rl_suffix: strict-sft-heavy-balanced-s18-g8-r8
-      reward_profile: tau_irc_balanced
+      rl_suffix: strict-sft-heavy-success-gated-s18-g8-r8
+      reward_profile: tau_irc_success_gated
       rl_train_limit: 144
       rl_steps: 18
       rl_groups_per_step: 8
@@ -241,8 +241,8 @@ profiles:
       sft_chunk_size_batches: 12
       sft_peak_lr: 0.00001
       rl_algos: grpo
-      rl_suffix: strict-low-lr-balanced-s22-g8-r8
-      reward_profile: tau_irc_balanced
+      rl_suffix: strict-low-lr-success-gated-s22-g8-r8
+      reward_profile: tau_irc_success_gated
       rl_train_limit: 176
       rl_steps: 22
       rl_groups_per_step: 8
@@ -270,8 +270,37 @@ profiles:
       skip_sft_eval: true
       skip_compare: true
       rl_algos: grpo
-      rl_suffix: strict-resample-balanced-s16-g8-r8-lr5e7
-      reward_profile: tau_irc_balanced
+      rl_suffix: strict-resample-success-gated-s16-g8-r8-lr5e7
+      reward_profile: tau_irc_success_gated
+      rl_train_limit: 176
+      rl_steps: 16
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_resample_sparse_process_h100:
+    description: GRPO-only sparse-success reward hedge; process and communication concerns only reduce successful trajectories.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-disjoint
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_disjoint
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-disjoint
+      eval_limit: 25
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: grpo
+      rl_suffix: strict-resample-sparse-process-s16-g8-r8-lr5e7
+      reward_profile: tau_irc_sparse_process
       rl_train_limit: 176
       rl_steps: 16
       rl_groups_per_step: 8
@@ -328,8 +357,8 @@ profiles:
       skip_sft_eval: true
       skip_compare: true
       rl_algos: grpo
-      rl_suffix: strict-resample-balanced-s16-g8-r8-lr5e7-temp05
-      reward_profile: tau_irc_balanced
+      rl_suffix: strict-resample-success-gated-s16-g8-r8-lr5e7-temp05
+      reward_profile: tau_irc_success_gated
       rl_train_limit: 176
       rl_steps: 16
       rl_groups_per_step: 8
@@ -358,8 +387,8 @@ profiles:
       skip_sft_eval: true
       skip_compare: true
       rl_algos: grpo
-      rl_suffix: strict-resample-balanced-s16-g8-r8-lr5e7-temp03
-      reward_profile: tau_irc_balanced
+      rl_suffix: strict-resample-success-gated-s16-g8-r8-lr5e7-temp03
+      reward_profile: tau_irc_success_gated
       rl_train_limit: 176
       rl_steps: 16
       rl_groups_per_step: 8
@@ -394,8 +423,8 @@ profiles:
       sft_chunk_size_batches: 12
       sft_peak_lr: 0.00001
       rl_algos: grpo
-      rl_suffix: strict-long-tauirc-s22-g8-r8
-      reward_profile: tau_irc
+      rl_suffix: strict-long-success-gated-s22-g8-r8
+      reward_profile: tau_irc_success_gated
       rl_train_limit: 176
       rl_steps: 22
       rl_groups_per_step: 8

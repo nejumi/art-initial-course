@@ -69,6 +69,8 @@ Because replay data cannot execute arbitrary alternative read-only queries, the 
 
 - `dense`, `strict_success`, `agentic`: teaching profiles that reward matching the demonstration trace. These are useful for explaining failure modes and tool-call syntax, but they should not be presented as official tau-bench scoring.
 - `tau_sparse`, `tau_irc`: tau-inspired profiles. They focus on state-changing actions and final communication. Read-only mismatches are diagnostics or small penalties, not core reward drivers.
+- `tau_irc_success_gated`: the main GRPO/GSPO course profile. It pays full reward only for verifiable task success, gives only small bridge credit for a correct state-changing action without a good final response, and gives no positive reward for communication, read-only lookup similarity, or tool-name partial matches by themselves. Missing, wrong, unknown, or truncated state-changing behavior receives negative reward so the optimizer cannot improve by becoming a polite non-acting agent.
+- `tau_irc_sparse_process`: a sparse success profile for ablations. Failed trajectories receive zero reward. Successful trajectories receive reward near one, with only small deductions for process concerns such as unnecessary read-only detours, excessive turns, or weak final communication. Safety and communication are treated as quality constraints on successful task completion, not as substitutes for task completion.
 
 In tau-inspired profiles, the replay environment can accept a single exact reference state-changing action even if the model skipped or reordered preceding read-only lookups. This is controlled by `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS` and defaults to `true` for the course path. Wrong state-changing names or arguments remain invalid and are counted as `bad_state_action`; the option removes unnecessary read-only replay dependence from the lightweight environment.
 
@@ -176,7 +178,7 @@ Eval rows and Weave scorers also record `first_failure_turn`, `first_state_actio
 
 Reward calibration worksheet:
 
-1. Run the same SFT checkpoint with `tau_sparse` and `tau_irc` on the same train/eval slices.
+1. Run the same SFT checkpoint with `tau_sparse`, `tau_irc_sparse_process`, `tau_irc_success_gated`, and `tau_irc` on the same train/eval slices.
 2. Compare winner-minus-loser gaps for outcome, task success, state-action sequence match, valid state action, communication, bad state action, missing state action, and truncation.
 3. Ablate read-only shaping separately from state-changing-action shaping.
 4. Keep a shaping term only if it separates successful from failed rollouts without rewarding irrelevant read-only lookup similarity.

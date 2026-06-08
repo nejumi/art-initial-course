@@ -731,6 +731,100 @@ class RetailRewardInvariantTests(unittest.TestCase):
         self.assertIn("reward_component/outcome", result.metrics)
         self.assertIn("reward_component/penalty_bad_state", result.metrics)
 
+    def test_success_gated_reward_does_not_pay_for_communication_without_state_action(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+        messages = [
+            {"role": "system", "content": scenario.system_message},
+            {"role": "user", "content": scenario.user_message},
+            {"role": "assistant", "content": scenario.expected_final_text},
+        ]
+
+        result = score_messages(messages, scenario, reward_profile="tau_irc_success_gated")
+
+        self.assertEqual(result.metrics["outcome_success"], 0.0)
+        self.assertEqual(result.metrics["missing_state_action"], 1.0)
+        self.assertEqual(result.metrics["communication_success"], 1.0)
+        self.assertEqual(result.metrics["reward_component/communication"], 0.0)
+        self.assertLess(result.reward, 0.0)
+
+    def test_success_gated_reward_allows_only_small_bridge_credit_for_correct_state_action(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+        messages = scenario.reference_messages[:-1]
+
+        result = score_messages(messages, scenario, reward_profile="tau_irc_success_gated")
+
+        self.assertEqual(result.metrics["outcome_success"], 0.0)
+        self.assertEqual(result.metrics["missing_state_action"], 0.0)
+        self.assertEqual(result.metrics["state_action_sequence_match"], 1.0)
+        self.assertEqual(result.metrics["reward_component/state_action_gate"], 0.25)
+        self.assertEqual(result.reward, 0.25)
+
+    def test_success_gated_reward_prioritizes_outcome_and_penalizes_wrong_state_action(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+        complete = score_messages(scenario.reference_messages, scenario, reward_profile="tau_irc_success_gated")
+        wrong_state = score_messages(
+            scenario.reference_messages,
+            scenario,
+            invalid_state_mutations=1,
+            bad_state_actions=1,
+            reward_profile="tau_irc_success_gated",
+        )
+
+        self.assertEqual(complete.metrics["outcome_success"], 1.0)
+        self.assertEqual(complete.reward, 1.0)
+        self.assertEqual(wrong_state.metrics["outcome_success"], 0.0)
+        self.assertLessEqual(wrong_state.reward, -1.0)
+
+    def test_sparse_process_reward_does_not_pay_for_safe_communication_failure(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+        messages = [
+            {"role": "system", "content": scenario.system_message},
+            {"role": "user", "content": scenario.user_message},
+            {"role": "assistant", "content": scenario.expected_final_text},
+        ]
+
+        result = score_messages(messages, scenario, reward_profile="tau_irc_sparse_process")
+
+        self.assertEqual(result.metrics["outcome_success"], 0.0)
+        self.assertEqual(result.metrics["missing_state_action"], 1.0)
+        self.assertEqual(result.metrics["communication_success"], 1.0)
+        self.assertEqual(result.metrics["reward_component/communication"], 0.0)
+        self.assertEqual(result.reward, 0.0)
+
+    def test_sparse_process_reward_does_not_prefer_safe_failure_over_bad_failure(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+
+        result = score_messages(
+            scenario.reference_messages,
+            scenario,
+            invalid_state_mutations=1,
+            bad_state_actions=1,
+            reward_profile="tau_irc_sparse_process",
+        )
+
+        self.assertEqual(result.metrics["outcome_success"], 0.0)
+        self.assertEqual(result.reward, 0.0)
+
+    def test_sparse_process_reward_penalizes_process_only_after_success(self) -> None:
+        scenario = scenario_from_record(sample_records()[0], split="train", index=0)
+        exact = score_messages(scenario.reference_messages, scenario, reward_profile="tau_irc_sparse_process")
+        rough_final_messages = list(scenario.reference_messages)
+        rough_final_messages[-1] = {"role": "assistant", "content": "Done. Order canceled."}
+        rough = score_messages(
+            rough_final_messages,
+            scenario,
+            read_only_reference_mismatches=2,
+            bad_read_only_calls=1,
+            reward_profile="tau_irc_sparse_process",
+        )
+
+        self.assertEqual(exact.metrics["outcome_success"], 1.0)
+        self.assertEqual(exact.reward, 1.0)
+        self.assertEqual(rough.metrics["outcome_success"], 1.0)
+        self.assertEqual(rough.metrics["reward_component/communication"], 0.0)
+        self.assertLess(rough.reward, 1.0)
+        self.assertGreater(rough.reward, 0.8)
+
     def test_truncated_full_reference_is_not_tau_success(self) -> None:
         scenario = scenario_from_record(sample_records()[0], split="train", index=0)
 

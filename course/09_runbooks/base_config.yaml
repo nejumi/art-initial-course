@@ -1158,3 +1158,43 @@ profiles:
       vllm_max_model_len: 16384
       vllm_max_num_batched_tokens: 16384
       vllm_max_num_seqs: 8
+
+  appendix_tau_synthetic_success_gated_long_grpo_h100:
+    description: Longer low-LR GRPO appendix branch from the tau-synthetic SFT anchor with success-gated reward.
+    args:
+      run_slug: lfm25-8b-a1b-tau-synthetic-retail
+      source_dataset_kind: tau_synthetic_retail
+      source_dir: .art/full_data/tau_synthetic_retail
+      data_dir: .art/curriculum_data/tau_synthetic_retail_bridge
+      sft_file: .art/curriculum_data/tau_synthetic_retail_bridge/sft_next_action_tau_synthetic.jsonl
+      data_artifact_name: retail-course-data-tau-synthetic-appendix
+      build_bridge: false
+      bridge_max_state_actions: 3
+      bridge_max_tool_calls: 20
+      bridge_max_turns: 72
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
+      eval_limit: 40
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: grpo
+      rl_suffix: tau-synthetic-success-gated-s64-g8-r8-lr2e7
+      reward_profile: tau_irc_success_gated
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      rl_train_limit: 425
+      rl_steps: 64
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000002
+      rl_candidate_metric: data/sample_retail_task_success_mean
+      rl_candidate_top_k: 8
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8

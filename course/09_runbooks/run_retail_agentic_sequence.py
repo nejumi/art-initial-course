@@ -269,6 +269,9 @@ def base_env(args: argparse.Namespace) -> dict[str, str]:
         env["ART_VLLM_MAX_NUM_BATCHED_TOKENS"] = str(args.vllm_max_num_batched_tokens)
     if args.vllm_max_num_seqs is not None:
         env["ART_VLLM_MAX_NUM_SEQS"] = str(args.vllm_max_num_seqs)
+    retail_tool_use_instruction = getattr(args, "retail_tool_use_instruction", None)
+    if retail_tool_use_instruction:
+        env["RETAIL_TOOL_USE_INSTRUCTION"] = str(retail_tool_use_instruction)
     if args.continue_on_invalid:
         env["RETAIL_TERMINATE_ON_INVALID"] = "false"
     return env
@@ -1030,6 +1033,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Allow traces generated with explicit memory/rule injection. Defaults to clean non-memory traces.",
     )
     parser.add_argument("--reward-profile", default="tau_irc")
+    parser.add_argument("--retail-tool-use-instruction", default=None)
     parser.add_argument("--max-completion-tokens", type=int, default=768)
     parser.add_argument("--art-seq-length", type=int, default=16384)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.70)

@@ -11,6 +11,17 @@ gpu_memory_presets:
     vllm_max_num_batched_tokens: 8192
     vllm_max_num_seqs: 4
 
+prompt_presets:
+  retail_agentic_state_action: &retail_agentic_state_action_prompt |
+    Your goal is to resolve the customer's retail request by using the provided tools.
+    Use read-only tools to authenticate the user, inspect order/product/profile state, and verify policy requirements before consequential actions.
+    Do not merely describe an action that changes order, return, exchange, payment, or address state.
+    When policy allows the action and the customer has provided the required information and confirmation, call the appropriate state-changing tool.
+    Make at most one tool call in a single assistant turn. If you call a tool, emit the tool call only and no assistant text.
+    If required information or confirmation is missing, ask the customer for it instead of guessing.
+    After all required tool work is complete, briefly tell the customer what was completed or what cannot be completed.
+    Do not write <think> tags or hidden reasoning in assistant messages.
+
 profiles:
   no_gpu_walkthrough:
     description: Print the full command sequence without launching training.
@@ -301,6 +312,154 @@ profiles:
       rl_algos: grpo
       rl_suffix: strict-resample-sparse-process-s16-g8-r8-lr5e7
       reward_profile: tau_irc_sparse_process
+      rl_train_limit: 176
+      rl_steps: 16
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_prompted_sft_anchor_h100:
+    description: Prompted SFT anchor run; downstream GRPO/GSPO branches share this checkpoint.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-prompted
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_prompted
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-prompted
+      build_bridge: true
+      bridge_max_tool_calls: 8
+      bridge_max_turns: 32
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
+      include_teacher_sft: true
+      teacher_sft_limit: 512
+      eval_limit: 25
+      sft_max_steps: 180
+      sft_chunk_size_batches: 12
+      sft_peak_lr: 0.00001
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      skip_rl: true
+      skip_compare: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_prompted_success_gated_grpo_h100:
+    description: GRPO branch from the shared prompted SFT anchor with success-gated reward.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-prompted
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_prompted
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-prompted
+      eval_limit: 25
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: grpo
+      rl_suffix: prompted-success-gated-s16-g8-r8-lr5e7
+      reward_profile: tau_irc_success_gated
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      rl_train_limit: 176
+      rl_steps: 16
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_prompted_sparse_process_grpo_h100:
+    description: GRPO branch from the shared prompted SFT anchor with sparse process reward.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-prompted
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_prompted
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-prompted
+      eval_limit: 25
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: grpo
+      rl_suffix: prompted-sparse-process-s16-g8-r8-lr5e7
+      reward_profile: tau_irc_sparse_process
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      rl_train_limit: 176
+      rl_steps: 16
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_prompted_success_gated_gspo_h100:
+    description: GSPO branch from the shared prompted SFT anchor with success-gated reward.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-prompted
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_prompted
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-prompted
+      eval_limit: 25
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: gspo
+      rl_suffix: prompted-success-gated-s16-g8-r8-lr5e7
+      reward_profile: tau_irc_success_gated
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      rl_train_limit: 176
+      rl_steps: 16
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 8
+
+  strict_prompted_sparse_process_gspo_h100:
+    description: GSPO branch from the shared prompted SFT anchor with sparse process reward.
+    args:
+      run_slug: lfm25-8b-a1b-retail-strict-prompted
+      data_dir: .art/curriculum_data/retail_bridge_state1_strict_prompted
+      source_dir: .art/full_data/retail
+      data_artifact_name: retail-course-data-strict-prompted
+      eval_limit: 25
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_compare: true
+      rl_algos: gspo
+      rl_suffix: prompted-sparse-process-s16-g8-r8-lr5e7
+      reward_profile: tau_irc_sparse_process
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
       rl_train_limit: 176
       rl_steps: 16
       rl_groups_per_step: 8

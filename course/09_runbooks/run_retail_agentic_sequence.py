@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from course.shared.config import MODEL_PROFILES, config_from_env
+from course.shared.wandb_artifacts import artifact_safe_name
 
 DEFAULT_RUN_CONFIG = PROJECT_ROOT / "course" / "09_runbooks" / "config.yaml"
 DEFAULT_BASE_CONFIG = PROJECT_ROOT / "course" / "09_runbooks" / "base_config.yaml"
@@ -90,7 +91,7 @@ def stage_env(
 
 
 def artifact_uri(name: str, alias: str = "latest") -> str:
-    return f"{name}:{alias}"
+    return f"{artifact_safe_name(name)}:{alias}"
 
 
 def retail_model_name(run_slug: str, stage: str) -> str:

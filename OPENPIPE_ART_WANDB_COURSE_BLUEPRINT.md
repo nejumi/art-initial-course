@@ -1,7 +1,7 @@
 # OpenPipe ART x W&B Models x Weave Training Course Blueprint
 
 作成日: 2026-05-29  
-最終更新: 2026-06-08
+最終更新: 2026-06-09
 想定: エンタープライズ利用者向け。ローカルGPU / Dedicated Cloud / Customer Managed (W&B公式名称では Self-Managed) を主軸にし、Multi-tenant SaaS と Serverless RL は比較・補足として扱う。
 
 ## 1. コースの北極星
@@ -242,6 +242,28 @@ RLVRのpitfall:
 | Simulator noise | multi-turn agentではユーザー役や環境のノイズが報酬を歪める | deterministic env、seed固定、rollout trace、複数rollout evalで分離する |
 | Distribution shift | train verifierでは勝つが、新しい言い回し・長い会話・異なるpolicyで崩れる | train/holdout分割、stochastic eval、scenario-level failure analysisを行う |
 
+RL学習中に成功率が崩れるときの診断:
+
+Agentic RLの学習曲線は単調改善しない。成功率が途中で落ちる場合は、単に「RLが効かない」と見るのではなく、方策更新、報酬、サンプリング、評価fold、長さ制約を切り分けて診断する。
+
+| 症状 | 主な仮説 | 既存知見との接続 | W&B / Weaveで見るもの | 対応策 |
+| --- | --- | --- | --- | --- |
+| PPO/GRPO系のpolicy update instability | 1回の更新で方策が動きすぎ、次のrollout分布が急に変わる | TRPO/PPOはpolicy updateをtrust regionやclippingで抑える発想を中心にする。TorchRLのGRPOLoss docsも、train/eval mode mismatchやESS低下をGRPO不安定化要因として扱う。 | KL、policy ratio、ESS、entropy、clip fraction、old/current logprob差、checkpoint前後のtrace | learning rateを下げる、KL penaltyを入れる、clipを強める、更新epochを減らす、collapse前checkpointへforkする |
+| rollout-training mismatch | vLLMなどの推論engineでrolloutし、別backendでtraining logprobを計算すると、同じ重みでもtoken probabilityがずれる | 近年のRL system研究では、hybrid engineがon-policy RLを実質off-policyにする問題として注目されている。vLLM/TorchTitanのbitwise-consistent RLやrollout-training mismatchの研究がこの問題を扱う。 | rollout logprob、training/current logprob、importance ratio、ESS、quantized rollout有無、bf16/fp32設定、vLLM runtime config | train/inference実装を揃える、current-policy logprob再計算を確認する、truncated importance samplingを使う、量子化rolloutを慎重に扱う |
+| reward overoptimization / reward hacking / reward collapse | proxy rewardを強く最適化し、真の成功率や品質が下がる | RLHFでは、proxy rewardが上がってもtrue qualityがplateauまたは劣化するreward over-optimizationが古典的問題。DAA/DPO系でも類似の劣化が報告されている。 | reward component別推移、`retail_task_success`、`bad_state_action`、`missing_state_action`、held-out eval、失敗trajectory trace | verifierを主軸にする、soft rewardの重みを下げる、KL/early stoppingを使う、external validationとacceptance gateを置く |
+| sparse rewardで学習信号が消える | group内の全trajectoryが同じ報酬になり、GRPO-style advantageが立たない | DeepSeekMathのGRPOは同一promptの複数サンプルをgroup化し、相対rewardから更新信号を作る。group内reward分散がないと信号が弱い。 | `step_reward_range_mean`、`step_num_groups_dropped_no_reward_signal`、`sample_*` と `step_*` の差、全失敗groupの割合 | rollouts-per-scenarioを増やす、balanced shapingを入れる、curriculumで難易度を調整する、drop前のsample metricsを主診断にする |
+| multi-turn tool agent特有のreward design instability | dense rewardがadvantageの向きを誤らせ、成功行動ではなく部分点行動へ寄せる | Iterative Reward Calibrationの研究では、multi-turn tool agentでnaive dense per-turn rewardが最大14pp性能劣化を起こすと報告されている。 | component別にscoreは上がるがtask successが上がらない、同じ失敗パターンのtraceが増える、advantage方向と成功率の対応 | outcome/state actionをanchorにする、communication/safetyは成功時の小さな補助または減点中心にする、rollout empirical analysisで報酬を校正する |
+| 生成が長くなる、反復する、途中打ち切りが増える | entropy collapse、過探索、overlong outputによる報酬ノイズ | DAPOはClip-Higher、dynamic sampling、overlong reward shapingを安定化要素として扱う。 | output length、turn count、`truncated_by_max_turn`、invalid tool、repeated tool call、entropy/KL | max tokens/turnsを現実的に設定する、truncation penaltyを入れる、長すぎるtrajectoryを別診断する、clip/KLを調整する |
+| 単なるbatch difficulty / train rolloutの見かけ低下 | train metricが固定validationではなく、毎step別scenarioなので難易度揺れが成功率低下に見える | RLはon-policy sampleに強く依存し、小規模foldでは難易度が大きく揺れる。train bestだけで採用するとcheckpoint cherry-pickingになりやすい。 | scenario/category別success、fold別success、bootstrap confidence、train sample metricsとfresh eval metrics | train metricだけで候補を絞り、validationで選び、最後は未使用testで一度だけ確認する。foldはcategoryを保ちつつrecord非重複にする |
+| GRPOとGSPOの差が不安定 | token-level / sequence-level importance samplingの粒度、長いtrajectory、MoEでのlogprob比の扱いが効く | GSPOはsequence-level importance ratioで長い生成やMoEの安定性を狙う実験的設定として位置づける。 | token/sequence logprob ratio、KL、長いtrajectoryの失敗率、MoE expert routingの揺れ | GRPO/GSPOを独立branchで比較し、同じSFT parent、同じheld-out eval、同じacceptance gateで判断する |
+
+スライドで伝える要点:
+
+- RLの成功率低下は「失敗」ではなく、観測と設計を改善するためのシグナル。
+- train metricは候補選択の補助であり、採用判断はfresh held-out evalとtrace inspectionで行う。
+- `sample_*` はrollout全体、`step_*` は学習に使ったtrajectory、`dropped_*` は捨てられたgroupを見る。分母の違いを混同しない。
+- 最後にtest splitを見る場合は、条件を固定して一度だけ確認する。validationを何度も見て選んだbestをtestなしで成果として扱わない。
+
 RULER / LLM-as-judgeの使いどころ:
 
 | 注意点 | 何が起きるか | 教材での扱い |
@@ -258,12 +280,21 @@ Key message:
 
 Reference anchors:
 
+- Schulman et al., "Trust Region Policy Optimization", 2015: https://arxiv.org/abs/1502.05477
+- Schulman et al., "Proximal Policy Optimization Algorithms", 2017: https://arxiv.org/abs/1707.06347
+- TorchRL GRPOLoss documentation: https://docs.pytorch.org/rl/stable/reference/generated/torchrl.objectives.llm.GRPOLoss.html
 - Ouyang et al., "Training language models to follow instructions with human feedback", 2022: https://arxiv.org/abs/2203.02155
+- vLLM/TorchTitan Teams, "No More Train-Inference Mismatch: Bitwise Consistent On-Policy Reinforcement Learning with vLLM and TorchTitan", 2025: https://vllm.ai/blog/bitwise-consistent-train-inference
+- Yao et al., "On the Rollout-Training Mismatch in Modern RL Systems", 2025: https://openreview.net/pdf?id=8MHqvb4lK9
 - Ng, Harada, Russell, "Policy invariance under reward transformations: Theory and application to reward shaping", 1999: https://ai.stanford.edu/~ang/papers/shaping-icml99.pdf
 - Lightman et al., "Let's Verify Step by Step", 2023: https://arxiv.org/abs/2305.20050
 - Amodei et al., "Concrete Problems in AI Safety", 2016: https://arxiv.org/abs/1606.06565
+- Krakovna et al., "Specification gaming: the flip side of AI ingenuity", 2020: https://deepmind.google/blog/specification-gaming-the-flip-side-of-ai-ingenuity
+- Rafailov et al., "Scaling Laws for Reward Model Overoptimization in Direct Alignment Algorithms", 2024: https://proceedings.neurips.cc/paper_files/paper/2024/file/e45caa3d5273d105b8d045e748636957-Paper-Conference.pdf
 - Shao et al., "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models", 2024: https://arxiv.org/abs/2402.03300
 - Guo et al., "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning", 2025: https://arxiv.org/abs/2501.12948
+- Yu et al., "DAPO: An Open-Source LLM Reinforcement Learning System at Scale", 2025: https://arxiv.org/abs/2503.14476
+- Modecrua et al., "Multi-Turn Reinforcement Learning for Tool-Calling Agents with Iterative Reward Calibration", 2026: https://arxiv.org/abs/2604.02869
 - Bai et al., "Constitutional AI: Harmlessness from AI Feedback", 2022: https://arxiv.org/abs/2212.08073
 - AReaL/SEA, "From Self-Evolving Synthetic Data to Verifiable-Reward RL: Post-Training Multi-turn Interactive Tool-Using Agents", 2026: https://arxiv.org/abs/2601.22607
 - tau2-bench repository: https://github.com/sierra-research/tau2-bench

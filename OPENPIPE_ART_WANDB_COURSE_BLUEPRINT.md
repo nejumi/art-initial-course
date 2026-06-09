@@ -116,6 +116,29 @@ overrides: {}
 - `base_config.yaml` は「標準profileの中身」。初回ハンズオンでは開かない。
 - CLI引数は一時的な上書き用。スライドとハンズオンでは `config.yaml` を主導線にする。
 
+実行方式:
+
+| 方式 | 使う場面 | コマンド |
+| --- | --- | --- |
+| 通常ターミナル | 受講者の基本導線。ローカルGPU、クラウドVM、SSH先のGPUサーバーで使う | `python course/09_runbooks/run_retail_agentic_sequence.py --run-profile workshop_fast_h100` |
+| 通常ターミナルのdry-run | GPUを使わず、実行されるコマンド列と設定解決を確認する | `python course/09_runbooks/run_retail_agentic_sequence.py --run-profile smoke_tiny` |
+| 通常ターミナルの長めの検証 | SFT/RL/evalを増やしてcheckpoint選択まで確認する | `python course/09_runbooks/run_retail_agentic_sequence.py --run-profile validated_h100` |
+| Slurm wrapper | Slurmクラスタで同じprofileをジョブ投入する | `sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch course/09_runbooks/config.yaml course/09_runbooks/base_config.yaml validated_h100` |
+
+Appendix用の通常ターミナル実行:
+
+```bash
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_sft_h100
+
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_factorized_grpo_h100
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_factorized_gspo_h100
+```
+
+複数GPUがある場合は `CUDA_VISIBLE_DEVICES` でGPUを分けて、GRPO/GSPOなどの分岐profileを並列に実行できる。Slurmはこの並列投入を楽にするラッパーであり、講座の基本実行方式ではない。
+
 推奨セグメント:
 
 | セグメント | 内容 | その場で動かすもの | 見せる証拠 |

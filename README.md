@@ -86,11 +86,17 @@ overrides: {}
 
 The default `run_profile` is the workshop-sized SFT -> GRPO path. For a full validation run, change it to `validated_h100`. Use `model_profile: tiny` for constrained hardware checks, or `gpu_memory_preset: low` to lower vLLM memory pressure. Detailed profile definitions are in [`course/09_runbooks/base_config.yaml`](course/09_runbooks/base_config.yaml).
 
-You can also choose a profile from the CLI:
+You can also choose a profile from the CLI. This is the normal path when you are
+running from a terminal without Slurm:
 
 ```bash
+# Print the generated commands without launching training.
 python course/09_runbooks/run_retail_agentic_sequence.py --run-profile smoke_tiny
+
+# Workshop-sized local GPU run.
 python course/09_runbooks/run_retail_agentic_sequence.py --run-profile workshop_fast_h100
+
+# Longer local GPU validation run.
 python course/09_runbooks/run_retail_agentic_sequence.py --run-profile validated_h100
 ```
 
@@ -177,7 +183,7 @@ The runbook defaults to `--continue-on-invalid` for tau-style RL. Unexpected sta
 For tau-inspired profiles, the lightweight replay environment also defaults to `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS=true`: a single exact reference state-changing action can skip preceding read-only replay turns, while wrong state-changing names or arguments still count as bad state actions. This keeps `retail_task_success` focused on consequential outcomes without requiring the full tau2 runtime.
 For stochastic validation, add `--eval-rollouts-per-scenario 4 --eval-temperature 0.2` so `outcome_pass_at_k`, `task_pass_at_k`, and reward variance columns are meaningful. Deterministic eval remains available for quick regression checks.
 
-On a Slurm H100 cluster, the same flow can be launched with:
+Slurm is optional. On a Slurm H100 cluster, the same profile can be launched with:
 
 ```bash
 sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
@@ -191,6 +197,31 @@ To include RULER in an advanced run, set `overrides: {rl_algos: "grpo,gspo,ruler
 Large-scale appendix path:
 
 ```bash
+# Terminal path: first build the larger synthetic retail source and SFT anchor.
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_sft_h100
+
+# Then run GRPO and GSPO branches from that SFT anchor.
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_factorized_grpo_h100
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_factorized_gspo_h100
+```
+
+If you have multiple local GPUs and want to run branches in parallel from a
+single terminal, assign one profile to each GPU:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_factorized_grpo_h100 &
+CUDA_VISIBLE_DEVICES=1 python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_factorized_gspo_h100 &
+wait
+```
+
+The Slurm equivalent is:
+
+```bash
 # First build the larger synthetic retail source and SFT anchor.
 sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
   course/09_runbooks/config.yaml \
@@ -199,8 +230,8 @@ sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
 
 # After the SFT anchor exists, run GRPO and GSPO branches in parallel on one 8xH100 node.
 sbatch course/09_runbooks/sunk_h100_parallel_profiles.sbatch \
-  appendix_tau_synthetic_grpo_h100 \
-  appendix_tau_synthetic_gspo_h100
+  appendix_tau_synthetic_factorized_grpo_h100 \
+  appendix_tau_synthetic_factorized_gspo_h100
 ```
 
 This parallel wrapper assigns one GPU to each profile. It speeds up branch sweeps and checkpoint evaluations, but it does not turn the current single-GPU LocalBackend loop into one distributed GRPO update. For true actor/learner rollout distribution, see the scaling appendix.

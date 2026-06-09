@@ -37,11 +37,16 @@ overrides: {}
 
 デフォルトはワークショップ用の SFT -> GRPO 実行です。フル検証に切り替える場合は `run_profile: validated_h100` に変えます。小さいGPUで確認する場合は `model_profile: tiny`、vLLMのメモリ使用を下げる場合は `gpu_memory_preset: low` にします。詳細なprofile定義は `course/09_runbooks/base_config.yaml` にありますが、通常は触りません。
 
-CLIから明示的に指定することもできます。
+CLIから明示的に指定することもできます。Slurmを使わない受講者は、この通常ターミナル実行が基本導線です。
 
 ```bash
+# 実行されるコマンドだけ確認する
 python course/09_runbooks/run_retail_agentic_sequence.py --run-profile smoke_tiny
+
+# ワークショップ用の短めのGPU実行
 python course/09_runbooks/run_retail_agentic_sequence.py --run-profile workshop_fast_h100
+
+# より長めの検証実行
 python course/09_runbooks/run_retail_agentic_sequence.py --run-profile validated_h100
 ```
 
@@ -53,7 +58,7 @@ tau風プロファイルでは `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS=true` 
 SFT warm startを強めるフル検証では、英語版READMEの `--include-teacher-sft`、`--include-areal-sft`、`--include-success-trace-sft` 例を使えます。runbookでは公開teacher next-actionデータも同じtask-hash splitのSFT foldに絞ってから混ぜます。
 比較後には各JSONL結果をcached predictionとしてWeave Evaluationにも流し、trace単位とstage単位の両方で確認できるようにしています。
 
-Slurm環境では次のラッパーを使えます。
+Slurmは任意です。Slurm環境では、同じprofileを次のラッパーで投入できます。
 
 ```bash
 sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
@@ -62,13 +67,35 @@ sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
   validated_h100
 ```
 
-大規模appendixでは、`appendix_tau_synthetic_sft_h100` で大きめのsynthetic retail SFT anchorを作り、その後 `sunk_h100_parallel_profiles.sbatch` で `appendix_tau_synthetic_grpo_h100` と `appendix_tau_synthetic_gspo_h100` を並列実行できます。これは複数profileをGPUごとに並列化する導線であり、現行の単一GRPO更新そのものを8GPU分散するものではありません。
+大規模appendixも通常ターミナルから実行できます。まず `appendix_tau_synthetic_sft_h100` でsynthetic retail SFT anchorを作り、その後GRPO/GSPOを分岐実行します。
+
+```bash
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_sft_h100
+
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_factorized_grpo_h100
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_factorized_gspo_h100
+```
+
+複数GPUがある場合は、ターミナルからGPUを分けて並列実行できます。
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_factorized_grpo_h100 &
+CUDA_VISIBLE_DEVICES=1 python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_factorized_gspo_h100 &
+wait
+```
+
+Slurm環境では `sunk_h100_parallel_profiles.sbatch` で同じことを投入できます。これは複数profileをGPUごとに並列化する導線であり、現行の単一GRPO更新そのものを8GPU分散するものではありません。
 
 ## 結果の確認
 
 現在の推奨条件は `LiquidAI/LFM2.5-8B-A1B`、task-disjoint bridge next-action SFT、SFT foldに絞ったpublic teacher next-action SFT mix、GRPOです。RL checkpointは最新stepを自動採用せず、候補checkpointをforkしてheld-out validationで確認します。
 
-結果はrunbookが出力する `checkpoint_eval_summary.md/.csv` とW&Bの横持ち比較表で確認します。最終的な期待値テーブルは、strict split条件での清書実行が完了した後に、この出力から更新します。
+結果はrunbookが出力する `checkpoint_eval_summary.md/.csv` とW&Bの横持ち比較表で確認します。
 
 ## 評価表
 

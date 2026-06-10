@@ -520,11 +520,13 @@ def main() -> None:
     sft = by_stage.get(args.sft_stage)
     if baseline is None:
         raise SystemExit(f"Missing baseline stage {args.baseline_stage!r}")
-    if sft is None:
-        raise SystemExit(f"Missing SFT stage {args.sft_stage!r}")
+    # RL-only comparisons (profiles that skip SFT but still run the gate)
+    # judge RL against the baseline stage instead of an SFT anchor.
+    rl_reference = sft if sft is not None else baseline
+    rl_reference_stage = args.sft_stage if sft is not None else args.baseline_stage
 
     path_by_stage = {stage: Path(path) for path, stage in zip(args.paths, args.stages, strict=True)}
-    sft_successes = stage_success_map(path_by_stage[args.sft_stage])
+    reference_successes = stage_success_map(path_by_stage[rl_reference_stage])
     explicit_train_metric_paths = parse_train_metrics_specs(args.train_metrics)
     train_summaries: dict[str, dict[str, Any]] = {}
     for stage, eval_path in path_by_stage.items():
@@ -532,7 +534,7 @@ def main() -> None:
         if train_path is not None and train_path.exists():
             train_summaries[stage] = summarize_train_metrics(train_path, stage=stage)
 
-    decisions = [judge_sft(sft, baseline, criteria)]
+    decisions = [judge_sft(sft, baseline, criteria)] if sft is not None else []
     for summary in summaries:
         stage = str(summary.get("stage"))
         if stage in {args.baseline_stage, args.sft_stage}:
@@ -541,9 +543,9 @@ def main() -> None:
         decisions.append(
             judge_rl_with_churn(
                 summary,
-                sft,
+                rl_reference,
                 criteria,
-                churn=success_churn(stage_successes, sft_successes),
+                churn=success_churn(stage_successes, reference_successes),
                 train_summary=train_summaries.get(stage),
             )
         )

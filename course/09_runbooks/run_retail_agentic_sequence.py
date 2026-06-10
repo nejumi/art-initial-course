@@ -900,12 +900,15 @@ def compare_results(
     stages = []
     model_artifacts = []
     baseline_path = report_dir / "eval_00_baseline.jsonl"
-    if baseline_path.exists() or args.dry_run:
+    if not args.skip_baseline_eval and (baseline_path.exists() or args.dry_run):
         paths.append(path_arg(baseline_path))
         stages.append("baseline")
         model_artifacts.append("-")
+    # Guard against stale eval files from earlier runs that shared this report
+    # directory: a run that skips SFT must not pull a previous run's SFT eval
+    # (and its checkpoint artifact reference) into the comparison.
     sft_path = report_dir / "eval_01_sft_anchor.jsonl"
-    if sft_path.exists() or args.dry_run:
+    if not args.skip_sft and (sft_path.exists() or args.dry_run):
         paths.append(path_arg(sft_path))
         stages.append("sft_anchor")
         model_artifacts.append(artifact_uri(f"{anchor_model}-checkpoint", "sft-anchor"))

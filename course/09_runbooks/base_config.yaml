@@ -919,6 +919,104 @@ profiles:
       vllm_max_num_batched_tokens: 16384
       vllm_max_num_seqs: 8
 
+  appendix_tau_synthetic_wide_data_h100:
+    description: Prepare the wider tau-synthetic RL/eval split and log it as a W&B data artifact.
+    args:
+      run_slug: lfm25-8b-a1b-tau-synthetic-retail-wide-data
+      source_dataset_kind: tau_synthetic_retail
+      source_dir: .art/full_data/tau_synthetic_retail
+      data_dir: .art/curriculum_data/tau_synthetic_retail_bridge_wide_rl
+      data_artifact_name: retail-course-data-tau-synthetic-wide-appendix
+      build_bridge: true
+      bridge_max_state_actions: 3
+      bridge_max_tool_calls: 20
+      bridge_max_turns: 72
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      skip_rl: true
+      skip_compare: true
+
+  appendix_tau_synthetic_wide_balanced_grpo_h100:
+    description: Best-evidence GRPO appendix branch from the tau-synthetic SFT anchor with the wider RL/eval split and balanced outcome reward.
+    args:
+      run_slug: lfm25-8b-a1b-tau-synthetic-retail
+      source_dataset_kind: tau_synthetic_retail
+      source_dir: .art/full_data/tau_synthetic_retail
+      data_dir: .art/curriculum_data/tau_synthetic_retail_bridge_wide_rl
+      sft_file: .art/curriculum_data/tau_synthetic_retail_bridge_wide_rl/sft_next_action.jsonl
+      data_artifact_name: retail-course-data-tau-synthetic-wide-appendix
+      build_bridge: false
+      bridge_max_state_actions: 3
+      bridge_max_tool_calls: 20
+      bridge_max_turns: 72
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
+      eval_limit: 40
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      rl_algos: grpo
+      rl_suffix: tau-synthetic-wide-balanced-tok768-ctx16384-s24-g8-r8-lr5e7
+      reward_profile: tau_irc_balanced
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      rl_train_limit: 425
+      rl_steps: 24
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      rl_candidate_metric: data/sample_retail_task_success_mean
+      rl_candidate_top_k: 5
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 4
+
+  appendix_tau_synthetic_wide_balanced_gspo_h100:
+    description: Best-evidence GSPO appendix branch from the tau-synthetic SFT anchor with the wider RL/eval split and balanced outcome reward.
+    args:
+      run_slug: lfm25-8b-a1b-tau-synthetic-retail
+      source_dataset_kind: tau_synthetic_retail
+      source_dir: .art/full_data/tau_synthetic_retail
+      data_dir: .art/curriculum_data/tau_synthetic_retail_bridge_wide_rl
+      sft_file: .art/curriculum_data/tau_synthetic_retail_bridge_wide_rl/sft_next_action.jsonl
+      data_artifact_name: retail-course-data-tau-synthetic-wide-appendix
+      build_bridge: false
+      bridge_max_state_actions: 3
+      bridge_max_tool_calls: 20
+      bridge_max_turns: 72
+      bridge_max_per_task: 0
+      bridge_holdout_mod: 6
+      eval_limit: 40
+      skip_baseline_eval: true
+      skip_sft: true
+      skip_sft_eval: true
+      rl_algos: gspo
+      rl_suffix: tau-synthetic-wide-balanced-tok768-ctx16384-s24-g8-r8-lr5e7
+      reward_profile: tau_irc_balanced
+      retail_tool_use_instruction: *retail_agentic_state_action_prompt
+      rl_train_limit: 425
+      rl_steps: 24
+      rl_groups_per_step: 8
+      rl_rollouts_per_scenario: 8
+      rl_max_sampling_rounds: 2
+      rl_learning_rate: 0.0000005
+      rl_candidate_metric: data/sample_retail_task_success_mean
+      rl_candidate_top_k: 5
+      eval_rl_candidates: true
+      max_completion_tokens: 768
+      art_seq_length: 16384
+      vllm_gpu_memory_utilization: 0.7
+      vllm_max_model_len: 16384
+      vllm_max_num_batched_tokens: 16384
+      vllm_max_num_seqs: 4
+
   appendix_tau_synthetic_grpo_h100:
     description: Long GRPO appendix branch from the tau-synthetic SFT anchor; intended for offline evidence, not live delivery.
     args:

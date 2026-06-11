@@ -23,6 +23,10 @@ export PYTHONUNBUFFERED=1
 
 CONFIG_PATH="${CONFIG_PATH:-course/09_runbooks/config.yaml}"
 BASE_CONFIG_PATH="${BASE_CONFIG_PATH:-course/09_runbooks/base_config.yaml}"
+EXTRA_ARGS=()
+if [[ -n "${RUNBOOK_EXTRA_ARGS:-}" ]]; then
+  read -r -a EXTRA_ARGS <<< "$RUNBOOK_EXTRA_ARGS"
+fi
 
 if [[ "$#" -eq 0 ]]; then
   PROFILES=(
@@ -39,6 +43,7 @@ echo "=== ART retail parallel profile runner ==="
 echo "config=$CONFIG_PATH"
 echo "base_config=$BASE_CONFIG_PATH"
 echo "profiles=${PROFILES[*]}"
+echo "extra_args=${EXTRA_ARGS[*]:-}"
 echo "WANDB_ENTITY=${WANDB_ENTITY:-}"
 echo "WANDB_PROJECT=${WANDB_PROJECT:-}"
 echo "WEAVE_PROJECT=${WEAVE_PROJECT:-}"
@@ -59,7 +64,8 @@ for index in "${!PROFILES[@]}"; do
     python -B course/09_runbooks/run_retail_agentic_sequence.py \
       --config "$CONFIG_PATH" \
       --base-config "$BASE_CONFIG_PATH" \
-      --run-profile "$profile"
+      --run-profile "$profile" \
+      "${EXTRA_ARGS[@]}"
   ) >"${log_prefix}.out" 2>"${log_prefix}.err" &
   PIDS+=("$!")
 done

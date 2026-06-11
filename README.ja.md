@@ -24,7 +24,7 @@ H100を使うメインハンズオンでは `course/09_runbooks/config.yaml` の
 
 ## 実行runbook
 
-baseline eval、next-action SFT、SFTからのGRPO/GSPO独立分岐、eval、W&B横持ち比較表までを再実行する入口を追加しています。詳細は英語版READMEのQuick Startと `course/09_runbooks/run_retail_agentic_sequence.py` を参照してください。
+baseline eval、next-action SFT、SFTからのGRPO/GSPO独立分岐、eval、W&B横持ち比較表までを再実行する入口を追加しています。通常は `course/09_runbooks/run_retail_agentic_sequence.py` をprofile指定で実行します。
 
 実行条件は `course/09_runbooks/config.yaml` で切り替えます。このファイルだけを参加者が触る前提です。
 
@@ -37,20 +37,94 @@ overrides: {}
 
 デフォルトはワークショップ用の SFT -> GRPO 実行です。フル検証に切り替える場合は `run_profile: validated_h100` に変えます。小さいGPUで確認する場合は `model_profile: tiny`、vLLMのメモリ使用を下げる場合は `gpu_memory_preset: low` にします。詳細なprofile定義は `course/09_runbooks/base_config.yaml` にありますが、通常は触りません。
 
-CLIから明示的に指定することもできます。Slurmを使わない受講者は、この通常ターミナル実行が基本導線です。
+`.env` はW&B/Weave/OpenAIなどの認証・プロジェクト設定、`config.yaml` はモデルサイズ・実行規模・GPUメモリ設定です。CLIで明示した値はYAMLより優先されます。
+
+### 何を実行するか
+
+| Job | Profile | 内容 |
+| --- | --- | --- |
+| 事前確認 | なし | Python環境、ART API、W&B/Weave接続を確認 |
+| コマンド確認 | `no_gpu_walkthrough` | 実際の学習はせず、runbookが発行するコマンド列を表示 |
+| 最小GPU smoke | `smoke_tiny` | 小型モデルでdata、SFT、GRPO、evalの配線だけを短時間確認 |
+| ハンズオン本体 | `workshop_fast_h100` | LFM2.5-8Bで短いSFT -> GRPOを実行 |
+| フル検証 | `validated_h100` | LFM2.5-8Bでbaseline、SFT、GRPO、candidate eval、比較表まで実行 |
+| 大規模appendix SFT | `appendix_tau_synthetic_sft_h100` | `fuvty/tau-bench-synthetic`でSFT anchorを作成 |
+| 大規模appendix data | `appendix_tau_synthetic_wide_data_h100` | GRPO/GSPO用のwide splitを生成 |
+| 大規模appendix GRPO | `appendix_tau_synthetic_wide_balanced_grpo_h100` | wide split上でbalanced rewardのGRPOを実行 |
+| 大規模appendix GSPO | `appendix_tau_synthetic_wide_balanced_gspo_h100` | wide split上でbalanced rewardのGSPOを実行 |
+
+### ターミナルから直接実行
+
+最初に接続確認を実行します。
 
 ```bash
-# 実行されるコマンドだけ確認する
+set -a
+source .env
+set +a
+export PATH="$PWD/.art/venv311/bin:$PWD/.venv/bin:$PATH"
+export PYTHONUNBUFFERED=1
+python course/00_setup/env_check.py
+python course/00_setup/art_api_smoke.py
+python course/00_setup/wandb_weave_smoke.py
+```
+
+GPUを使わずにrunbookの中身だけ確認します。
+
+```bash
+set -a
+source .env
+set +a
+export PATH="$PWD/.art/venv311/bin:$PWD/.venv/bin:$PATH"
+export PYTHONUNBUFFERED=1
+python course/09_runbooks/run_retail_agentic_sequence.py --run-profile no_gpu_walkthrough
+```
+
+最小GPU smokeです。
+
+```bash
+set -a
+source .env
+set +a
+export PATH="$PWD/.art/venv311/bin:$PWD/.venv/bin:$PATH"
+export PYTHONUNBUFFERED=1
 python course/09_runbooks/run_retail_agentic_sequence.py --run-profile smoke_tiny
+```
 
-# ワークショップ用の短めのGPU実行
+ハンズオン本体の短めのGPU実行です。
+
+```bash
+set -a
+source .env
+set +a
+export PATH="$PWD/.art/venv311/bin:$PWD/.venv/bin:$PATH"
+export PYTHONUNBUFFERED=1
 python course/09_runbooks/run_retail_agentic_sequence.py --run-profile workshop_fast_h100
+```
 
-# より長めの検証実行
+フル検証です。
+
+```bash
+set -a
+source .env
+set +a
+export PATH="$PWD/.art/venv311/bin:$PWD/.venv/bin:$PATH"
+export PYTHONUNBUFFERED=1
 python course/09_runbooks/run_retail_agentic_sequence.py --run-profile validated_h100
 ```
 
-runbookでは `config.yaml` が実行条件、`.env` がW&B/Weave/OpenAIなどの認証・プロジェクト設定です。CLIで明示した値はYAMLより優先されます。
+同じcloneで清書用に完全に分離して再実行する場合は、ART保存先とrun slugを変えます。
+
+```bash
+set -a
+source .env
+set +a
+export PATH="$PWD/.art/venv311/bin:$PWD/.venv/bin:$PATH"
+export PYTHONUNBUFFERED=1
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile validated_h100 \
+  --run-slug lfm25-8b-a1b-retail-validated-clean \
+  --art-path .art/course_runs_clean
+```
 
 runbookはtau-style RL向けに `--continue-on-invalid` をデフォルトで有効化しています。stochastic evalには `--eval-rollouts-per-scenario 4 --eval-temperature 0.2` を加えると、pass@kとreward varianceも比較できます。
 tau風プロファイルでは `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS=true` もデフォルトです。これは、正しいstate-changing actionだけは先行するread-only再現順序を飛ばして受理する設定で、誤った状態変更や未知ツールは引き続き失敗として記録します。これにより、講座の主成功指標 `retail_task_success` はread-only toolの順序ではなく、結果に効く状態変更と最終応答を中心に見ます。
@@ -58,38 +132,127 @@ tau風プロファイルでは `RETAIL_ALLOW_REFERENCE_STATE_ACTION_JUMPS=true` 
 SFT warm startを強めるフル検証では、英語版READMEの `--include-teacher-sft`、`--include-areal-sft`、`--include-success-trace-sft` 例を使えます。runbookでは公開teacher next-actionデータも同じtask-hash splitのSFT foldに絞ってから混ぜます。
 比較後には各JSONL結果をcached predictionとしてWeave Evaluationにも流し、trace単位とstage単位の両方で確認できるようにしています。
 
-Slurmは任意です。Slurm環境では、同じprofileを次のラッパーで投入できます。
+大規模appendixは、SFT anchorを作ってからGRPO/GSPOを分岐します。
 
 ```bash
-sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+set -a
+source .env
+set +a
+export PATH="$PWD/.art/venv311/bin:$PWD/.venv/bin:$PATH"
+export PYTHONUNBUFFERED=1
+python course/09_runbooks/run_retail_agentic_sequence.py --run-profile appendix_tau_synthetic_sft_h100
+python course/09_runbooks/run_retail_agentic_sequence.py --run-profile appendix_tau_synthetic_wide_data_h100
+python course/09_runbooks/run_retail_agentic_sequence.py --run-profile appendix_tau_synthetic_wide_balanced_grpo_h100
+python course/09_runbooks/run_retail_agentic_sequence.py --run-profile appendix_tau_synthetic_wide_balanced_gspo_h100
+```
+
+### Slurmから実行
+
+Slurmは任意です。SUNKのようなSlurm H100環境では、同じprofileをsbatch wrapperで投入できます。`ART_COURSE_ROOT="$PWD"` を付けているので、今いるrepoディレクトリをジョブ側でも使います。
+
+接続確認です。
+
+```bash
+mkdir -p .art/sunk_runs/logs
+sbatch \
+  --job-name=art-setup-check \
+  --partition=h100 \
+  --gres=gpu:h100:1 \
+  --cpus-per-task=8 \
+  --mem=64G \
+  --time=00:30:00 \
+  --output=.art/sunk_runs/logs/%x-%j.out \
+  --error=.art/sunk_runs/logs/%x-%j.err \
+  --wrap='cd "$SLURM_SUBMIT_DIR" && set -a && source .env && set +a && export PATH="$PWD/.art/venv311/bin:$PWD/.venv/bin:$PATH" && export PYTHONUNBUFFERED=1 && python course/00_setup/env_check.py && python course/00_setup/art_api_smoke.py && python course/00_setup/wandb_weave_smoke.py'
+```
+
+GPUを使わずにrunbookの中身だけ確認します。
+
+```bash
+ART_COURSE_ROOT="$PWD" sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  no_gpu_walkthrough
+```
+
+最小GPU smokeです。
+
+```bash
+ART_COURSE_ROOT="$PWD" sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  smoke_tiny
+```
+
+ハンズオン本体の短めのGPU実行です。
+
+```bash
+ART_COURSE_ROOT="$PWD" sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  workshop_fast_h100
+```
+
+フル検証です。
+
+```bash
+ART_COURSE_ROOT="$PWD" sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
   course/09_runbooks/config.yaml \
   course/09_runbooks/base_config.yaml \
   validated_h100
 ```
 
-大規模appendixも通常ターミナルから実行できます。まず `appendix_tau_synthetic_sft_h100` でsynthetic retail SFT anchorを作り、その後GRPO/GSPOを分岐実行します。
+同じcloneで清書用に完全に分離して再実行する場合です。
 
 ```bash
-python course/09_runbooks/run_retail_agentic_sequence.py \
-  --run-profile appendix_tau_synthetic_sft_h100
-
-python course/09_runbooks/run_retail_agentic_sequence.py \
-  --run-profile appendix_tau_synthetic_factorized_grpo_h100
-python course/09_runbooks/run_retail_agentic_sequence.py \
-  --run-profile appendix_tau_synthetic_factorized_gspo_h100
+ART_COURSE_ROOT="$PWD" sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  validated_h100 \
+  --run-slug lfm25-8b-a1b-retail-validated-clean \
+  --art-path .art/course_runs_clean
 ```
 
-複数GPUがある場合は、ターミナルからGPUを分けて並列実行できます。
+大規模appendixは、SFT anchor完了後にGRPO/GSPOを同じ8xH100ノード内で並列投入します。
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python course/09_runbooks/run_retail_agentic_sequence.py \
-  --run-profile appendix_tau_synthetic_factorized_grpo_h100 &
-CUDA_VISIBLE_DEVICES=1 python course/09_runbooks/run_retail_agentic_sequence.py \
-  --run-profile appendix_tau_synthetic_factorized_gspo_h100 &
-wait
+mkdir -p .art/sunk_runs/logs
+jid_sft=$(ART_COURSE_ROOT="$PWD" sbatch --parsable course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  appendix_tau_synthetic_sft_h100)
+jid_data=$(ART_COURSE_ROOT="$PWD" sbatch --parsable --dependency=afterok:${jid_sft} course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  appendix_tau_synthetic_wide_data_h100)
+ART_COURSE_ROOT="$PWD" sbatch --dependency=afterok:${jid_data} course/09_runbooks/sunk_h100_parallel_profiles.sbatch \
+  appendix_tau_synthetic_wide_balanced_grpo_h100 \
+  appendix_tau_synthetic_wide_balanced_gspo_h100
 ```
 
-Slurm環境では `sunk_h100_parallel_profiles.sbatch` で同じことを投入できます。これは複数profileをGPUごとに並列化する導線であり、現行の単一GRPO更新そのものを8GPU分散するものではありません。
+清書用にappendixも過去checkpointから分離する場合です。
+
+```bash
+mkdir -p .art/sunk_runs/logs
+jid_sft=$(ART_COURSE_ROOT="$PWD" sbatch --parsable course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  appendix_tau_synthetic_sft_h100 \
+  --run-slug lfm25-8b-a1b-tau-synthetic-retail-clean \
+  --art-path .art/course_runs_clean)
+jid_data=$(ART_COURSE_ROOT="$PWD" sbatch --parsable --dependency=afterok:${jid_sft} course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  appendix_tau_synthetic_wide_data_h100 \
+  --run-slug lfm25-8b-a1b-tau-synthetic-retail-wide-data-clean \
+  --art-path .art/course_runs_clean)
+RUNBOOK_EXTRA_ARGS="--run-slug lfm25-8b-a1b-tau-synthetic-retail-clean --art-path .art/course_runs_clean" \
+ART_COURSE_ROOT="$PWD" sbatch --dependency=afterok:${jid_data} course/09_runbooks/sunk_h100_parallel_profiles.sbatch \
+  appendix_tau_synthetic_wide_balanced_grpo_h100 \
+  appendix_tau_synthetic_wide_balanced_gspo_h100
+```
+
+`sunk_h100_parallel_profiles.sbatch` はprofileごとにGPUを1枚ずつ割り当てます。複数のGRPO/GSPO条件を速く比較するための導線であり、単一GRPO更新そのものを8GPU分散するものではありません。
 
 ## 結果の確認
 

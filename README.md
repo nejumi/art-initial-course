@@ -87,20 +87,41 @@ overrides: {}
 The default `run_profile` is the workshop-sized SFT -> GRPO path. For a full validation run, change it to `validated_h100`. Use `model_profile: tiny` for constrained hardware checks, or `gpu_memory_preset: low` to lower vLLM memory pressure. Detailed profile definitions are in [`course/09_runbooks/base_config.yaml`](course/09_runbooks/base_config.yaml).
 
 You can also choose a profile from the CLI. This is the normal path when you are
-running from a terminal without Slurm:
+running from a terminal without Slurm. The commands below are copy-pasteable from
+the repository root after `.env` has been configured:
 
 ```bash
-# Print the generated commands without launching training.
+set -a
+source .env
+set +a
+export PATH="$PWD/.art/venv311/bin:$PWD/.venv/bin:$PATH"
+export PYTHONUNBUFFERED=1
+python course/00_setup/env_check.py
+python course/00_setup/art_api_smoke.py
+python course/00_setup/wandb_weave_smoke.py
+python course/09_runbooks/run_retail_agentic_sequence.py --run-profile no_gpu_walkthrough
 python course/09_runbooks/run_retail_agentic_sequence.py --run-profile smoke_tiny
-
-# Workshop-sized local GPU run.
 python course/09_runbooks/run_retail_agentic_sequence.py --run-profile workshop_fast_h100
-
-# Longer local GPU validation run.
 python course/09_runbooks/run_retail_agentic_sequence.py --run-profile validated_h100
 ```
 
 For the workshop runbook, `config.yaml` is the source of truth for run scale, model size, and GPU memory. `.env` is for account/project credentials and runtime secrets.
+
+If you rerun the same profile from the same clone and want to keep local ART
+checkpoints isolated from earlier experiments, give the run a fresh slug and ART
+storage path:
+
+```bash
+set -a
+source .env
+set +a
+export PATH="$PWD/.art/venv311/bin:$PWD/.venv/bin:$PATH"
+export PYTHONUNBUFFERED=1
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile validated_h100 \
+  --run-slug lfm25-8b-a1b-retail-validated-clean \
+  --art-path .art/course_runs_clean
+```
 
 Bridge curriculum option for a shorter first RL lab:
 
@@ -186,10 +207,21 @@ For stochastic validation, add `--eval-rollouts-per-scenario 4 --eval-temperatur
 Slurm is optional. On a Slurm H100 cluster, the same profile can be launched with:
 
 ```bash
-sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+ART_COURSE_ROOT="$PWD" sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
   course/09_runbooks/config.yaml \
   course/09_runbooks/base_config.yaml \
   validated_h100
+```
+
+The isolated rerun form is:
+
+```bash
+ART_COURSE_ROOT="$PWD" sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  validated_h100 \
+  --run-slug lfm25-8b-a1b-retail-validated-clean \
+  --art-path .art/course_runs_clean
 ```
 
 To include RULER in an advanced run, set `overrides: {rl_algos: "grpo,gspo,ruler"}` or create an instructor profile in `base_config.yaml`. RULER uses an external judge model, so plan for the extra judge calls.
@@ -200,12 +232,14 @@ Large-scale appendix path:
 # Terminal path: first build the larger synthetic retail source and SFT anchor.
 python course/09_runbooks/run_retail_agentic_sequence.py \
   --run-profile appendix_tau_synthetic_sft_h100
+python course/09_runbooks/run_retail_agentic_sequence.py \
+  --run-profile appendix_tau_synthetic_wide_data_h100
 
 # Then run GRPO and GSPO branches from that SFT anchor.
 python course/09_runbooks/run_retail_agentic_sequence.py \
-  --run-profile appendix_tau_synthetic_factorized_grpo_h100
+  --run-profile appendix_tau_synthetic_wide_balanced_grpo_h100
 python course/09_runbooks/run_retail_agentic_sequence.py \
-  --run-profile appendix_tau_synthetic_factorized_gspo_h100
+  --run-profile appendix_tau_synthetic_wide_balanced_gspo_h100
 ```
 
 If you have multiple local GPUs and want to run branches in parallel from a
@@ -213,25 +247,51 @@ single terminal, assign one profile to each GPU:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python course/09_runbooks/run_retail_agentic_sequence.py \
-  --run-profile appendix_tau_synthetic_factorized_grpo_h100 &
+  --run-profile appendix_tau_synthetic_wide_balanced_grpo_h100 &
 CUDA_VISIBLE_DEVICES=1 python course/09_runbooks/run_retail_agentic_sequence.py \
-  --run-profile appendix_tau_synthetic_factorized_gspo_h100 &
+  --run-profile appendix_tau_synthetic_wide_balanced_gspo_h100 &
 wait
 ```
 
 The Slurm equivalent is:
 
 ```bash
-# First build the larger synthetic retail source and SFT anchor.
-sbatch course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+mkdir -p .art/sunk_runs/logs
+jid_sft=$(ART_COURSE_ROOT="$PWD" sbatch --parsable course/09_runbooks/sunk_h100_retail_config_run.sbatch \
   course/09_runbooks/config.yaml \
   course/09_runbooks/base_config.yaml \
-  appendix_tau_synthetic_sft_h100
+  appendix_tau_synthetic_sft_h100)
+jid_data=$(ART_COURSE_ROOT="$PWD" sbatch --parsable --dependency=afterok:${jid_sft} course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  appendix_tau_synthetic_wide_data_h100)
 
 # After the SFT anchor exists, run GRPO and GSPO branches in parallel on one 8xH100 node.
-sbatch course/09_runbooks/sunk_h100_parallel_profiles.sbatch \
-  appendix_tau_synthetic_factorized_grpo_h100 \
-  appendix_tau_synthetic_factorized_gspo_h100
+ART_COURSE_ROOT="$PWD" sbatch --dependency=afterok:${jid_data} course/09_runbooks/sunk_h100_parallel_profiles.sbatch \
+  appendix_tau_synthetic_wide_balanced_grpo_h100 \
+  appendix_tau_synthetic_wide_balanced_gspo_h100
+```
+
+For an isolated appendix rerun from the same clone:
+
+```bash
+mkdir -p .art/sunk_runs/logs
+jid_sft=$(ART_COURSE_ROOT="$PWD" sbatch --parsable course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  appendix_tau_synthetic_sft_h100 \
+  --run-slug lfm25-8b-a1b-tau-synthetic-retail-clean \
+  --art-path .art/course_runs_clean)
+jid_data=$(ART_COURSE_ROOT="$PWD" sbatch --parsable --dependency=afterok:${jid_sft} course/09_runbooks/sunk_h100_retail_config_run.sbatch \
+  course/09_runbooks/config.yaml \
+  course/09_runbooks/base_config.yaml \
+  appendix_tau_synthetic_wide_data_h100 \
+  --run-slug lfm25-8b-a1b-tau-synthetic-retail-wide-data-clean \
+  --art-path .art/course_runs_clean)
+RUNBOOK_EXTRA_ARGS="--run-slug lfm25-8b-a1b-tau-synthetic-retail-clean --art-path .art/course_runs_clean" \
+ART_COURSE_ROOT="$PWD" sbatch --dependency=afterok:${jid_data} course/09_runbooks/sunk_h100_parallel_profiles.sbatch \
+  appendix_tau_synthetic_wide_balanced_grpo_h100 \
+  appendix_tau_synthetic_wide_balanced_gspo_h100
 ```
 
 This parallel wrapper assigns one GPU to each profile. It speeds up branch sweeps and checkpoint evaluations, but it does not turn the current single-GPU LocalBackend loop into one distributed GRPO update. For true actor/learner rollout distribution, see the scaling appendix.
@@ -283,32 +343,11 @@ python course/03_sft_warmup/train_sft_local.py \
   --chunk-size-batches 12
 ```
 
-To run ART training, configure W&B and a local GPU environment:
-
-```bash
-export WANDB_ENTITY=<entity>
-export WANDB_PROJECT=openpipe-art-retail
-export OPENAI_API_KEY=<optional-for-external-baseline>
-
-python course/07_models_registry_weave/log_data_artifacts.py --data-dir data/retail
-
-python course/03_sft_warmup/train_sft_local.py \
-  --data-artifact retail-course-data:latest \
-  --batch-size 1 \
-  --peak-lr 3e-5 \
-  --max-steps 48 \
-  --chunk-size-batches 12
-
-python course/04_grpo_local/train_grpo_local.py \
-  --data-artifact retail-course-data:latest \
-  --parent-artifact retail-support-agent-checkpoint:sft-anchor \
-  --steps 8 \
-  --groups-per-step 4 \
-  --rollouts-per-scenario 4 \
-  --reward-profile tau_irc \
-  --continue-on-invalid \
-  --learning-rate 5e-6
-```
+For ART training, prefer the profile-based runbook commands above. The lower
+level scripts under `course/03_sft_warmup` and `course/04_grpo_local` are kept
+for instructors who want to isolate one stage, but the runbook is the path that
+keeps W&B Artifacts, Weave traces, stage tags, and checkpoint comparison tables
+consistent.
 
 `dense` is a replay-style teaching reward. Use `tau_irc` or `tau_irc_balanced` for the main agentic RL lab because they keep verifiable outcome/state-changing-action signal as the anchor while treating read-only replay mismatches as diagnostics or small penalties.
 

@@ -25,6 +25,7 @@ export WEAVE_SERVER_CACHE_DIR="${WEAVE_SERVER_CACHE_DIR:-$PWD/.art/weave_cache/$
 CONFIG_PATH="${1:-course/09_runbooks/config.yaml}"
 BASE_CONFIG_PATH="${2:-course/09_runbooks/base_config.yaml}"
 RUN_PROFILE="${3:-}"
+EXTRA_ARGS=("${@:4}")
 
 mkdir -p .art/sunk_runs/logs
 mkdir -p "$WEAVE_SERVER_CACHE_DIR"
@@ -33,6 +34,7 @@ echo "=== retail ART config runbook ==="
 echo "config=$CONFIG_PATH"
 echo "base_config=$BASE_CONFIG_PATH"
 echo "run_profile=${RUN_PROFILE:-from config}"
+echo "extra_args=${EXTRA_ARGS[*]:-}"
 echo "WANDB_ENTITY=${WANDB_ENTITY:-}"
 echo "WANDB_PROJECT=${WANDB_PROJECT:-}"
 echo "WEAVE_PROJECT=${WEAVE_PROJECT:-}"
@@ -49,7 +51,8 @@ fi
 python -B course/09_runbooks/run_retail_agentic_sequence.py \
   --config "$CONFIG_PATH" \
   --base-config "$BASE_CONFIG_PATH" \
-  "${RUN_PROFILE_ARGS[@]}"
+  "${RUN_PROFILE_ARGS[@]}" \
+  "${EXTRA_ARGS[@]}"
 
 date -Is
 nvidia-smi
